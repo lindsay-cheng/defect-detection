@@ -6,7 +6,6 @@ import cv2
 import os
 import sys
 
-# add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from backend.detector import DefectDetector
@@ -28,14 +27,11 @@ def detect_live(
         save_detections: save defect images
         log_to_db: log defects to database
     """
-    # initialize detector
     detector = DefectDetector(
         model_path=model_path,
         conf_threshold=conf_threshold,
         save_images=save_detections
     )
-    
-    # open video source
     cap = cv2.VideoCapture(source)
     
     if not cap.isOpened():
@@ -51,13 +47,8 @@ def detect_live(
                 print("end of video or cannot read frame")
                 break
             
-            # run detection
             annotated_frame, detections = detector.detect_frame(frame)
-            
-            # get stats
             stats = detector.get_stats()
-            
-            # display stats on frame
             cv2.putText(
                 annotated_frame,
                 f"FPS: {stats['fps']:.1f}",
@@ -78,10 +69,7 @@ def detect_live(
                 2
             )
             
-            # display
             cv2.imshow("bottle defect detection", annotated_frame)
-            
-            # handle keyboard input
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
@@ -97,7 +85,6 @@ def detect_live(
         cv2.destroyAllWindows()
         detector.cleanup()
         
-        # print final stats
         stats = detector.get_stats()
         print("\n=== final statistics ===")
         print(f"total inspected: {stats['total_inspected']}")
@@ -122,7 +109,6 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # parse source
     source = 0 if args.source == "0" else args.source
     
     detect_live(
