@@ -6,7 +6,7 @@ Automated visual inspection system for identifying defects in plastic bottles us
 
 This system uses YOLOv8 object detection to automatically detect and classify defective bottles in real-time. Designed for quality control in manufacturing environments.
 
-Fine-tuning + accuracy WIP
+Fine-tuning + tracking accuracy WIP
 
 ## Training (image collection)
 
