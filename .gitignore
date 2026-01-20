@@ -1,11 +1,16 @@
 # Dataset (don't commit large image datasets)
-dataset/images/
-dataset/labels/
+context.txt
+
+# Dataset (don't commit large image datasets)
+dataset/data/
+dataset/raw/
 data/raw/
 
 # Model weights (too large for git)
 *.pt
 !yolov8n.pt  # Keep base model if small enough
+!my_model/*.pt
+!my_model/**/*.pt
 models/*.pt
 runs/
 
