@@ -1,0 +1,72 @@
+Real-Time Defect Detection System Documentation
+Overview
+Automated visual inspection system for identifying defects in plastic bottles on a production line
+Uses computer vision to detect, classify, and track defective bottles in real-time, storing results in a database for quality control analysis
+Key Features
+Real-time bottle inspection using camera feed
+Defect classification into 4 categories:
+water level issues
+bottle/plastic damage
+label problems (damaged/missing)
+general defects/wrong bottle types
+Unique ID assignment per bottle
+Automated image capture of defective items
+SQL database logging
+Requirements
+Hardware
+processing unit options:
+Kaggle/google colab online for training
+Macbook m4 air for inference
+optional: gate/sorting mechanism for physical separation
+Just webcam (conveyor movement will be simulated via rudimentary methods)
+Tech Stack
+computer vision: opencv
+deep learning: custom trained object detection model (tensorflor/pytorch)
+object tracking: opencv tracking algorithms
+database: sqlite
+language: python
+hardware acceleration: cuda (nvidia gpu)
+database: sql database (SQLite)
+gui: tkinter
+
+System Architecture
+Detection Pipeline
+object detection: identifies bottles and defects using trained model
+object tracking: assigns unique IDs to prevent duplicate checks
+classification: categorizes defect type
+data logging: stores defect info, ID, timestamp, and image path in database
+image archival: saves photo of defective bottle with ID reference
+Database Schema
+defects_table:
+- id (unique bottle identifier)
+- timestamp
+- defect_type (water_level/bottle_damage/label_issue/general)
+- image_path
+Frontend Design
+minimal dashboard showing:
+live camera feed with bounding boxes
+real-time defect counter by type
+recent defect log
+batch statistics/error percentage
+ 
+Backend
+continuous video processing loop
+frame-by-frame object detection
+tracking algorithm maintains bottle IDs across frames
+defect classification logic
+database insertion on defect detection
+image file management system
+Training Requirements
+model needs training data for:
+normal bottles
+defective bottles (various types)
+labels (normal and damaged)
+background/conveyor environment
+minimum 500-1000 labeled images per category recommended for decent accuracy
+Defect Classes
+Good 100
+No label 60
+Label damage 60
+No cap 60
+Dent/crack 60
+
