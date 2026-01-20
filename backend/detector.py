@@ -15,7 +15,6 @@ from backend.database import DefectDatabase
 class DefectDetector:
     """main detection pipeline coordinating model, tracking, and logging"""
     
-    # defect type mappings (from trained model)
     DEFECT_TYPES = {
         0: "good",
         1: "low_water",
@@ -45,25 +44,17 @@ class DefectDetector:
         self.save_images = save_images
         self.images_dir = images_dir
         
-        # initialize components
         self.tracker = CentroidTracker(max_disappeared=30, max_distance=50)
         self.database = DefectDatabase(db_path)
-        
-        # model placeholder (will be loaded when model is ready)
         self.model = None
         if model_path:
             self._load_model(model_path)
         
-        # tracking stats
         self.total_inspected = 0
         self.total_defects = 0
-        self.logged_bottles = set()  # track which bottles we've already logged
-        
-        # fps calculation
+        self.logged_bottles = set()
         self.fps_buffer = deque(maxlen=30)
         self.last_time = time.time()
-        
-        # create images directory
         import os
         if self.save_images and not os.path.exists(self.images_dir):
             os.makedirs(self.images_dir)
@@ -94,26 +85,16 @@ class DefectDetector:
         detections = []
         
         if self.model is None:
-            # mock detection for testing (detect random rectangles)
             detections = self._mock_detection(frame)
         else:
-            # real model inference
             detections = self._run_inference(frame)
-        
-        # extract bounding boxes for tracking
         bboxes = [(d['bbox'][0], d['bbox'][1], d['bbox'][2], d['bbox'][3]) 
                   for d in detections]
-        
-        # update tracker
         tracked_objects = self.tracker.update(bboxes)
-        
-        # match detections to tracked IDs
         for detection in detections:
             bbox = detection['bbox']
             cx = int(bbox[0] + bbox[2] / 2)
             cy = int(bbox[1] + bbox[3] / 2)
-            
-            # find closest tracked object
             object_id = self.tracker.get_object_id_by_centroid((cx, cy))
             if object_id is not None:
                 detection['object_id'] = object_id
@@ -122,13 +103,8 @@ class DefectDetector:
                 detection['object_id'] = None
                 detection['bottle_id'] = "UNKNOWN"
         
-        # log defects to database
         self._log_detections(frame, detections)
-        
-        # annotate frame
         annotated_frame = self._annotate_frame(frame.copy(), detections)
-        
-        # calculate fps
         current_time = time.time()
         fps = 1.0 / (current_time - self.last_time)
         self.fps_buffer.append(fps)
@@ -145,8 +121,6 @@ class DefectDetector:
         returns:
             list of mock detections
         """
-        # return empty list (no detections) for now
-        # this allows testing the pipeline without a model
         return []
     
     def _run_inference(self, frame: np.ndarray) -> List[Dict[str, Any]]:
@@ -160,7 +134,6 @@ class DefectDetector:
         """
         detections = []
         
-        # run yolo inference
         results = self.model(frame, conf=self.conf_threshold, verbose=False)
         for result in results:
             boxes = result.boxes
@@ -189,24 +162,15 @@ class DefectDetector:
             bottle_id = detection.get('bottle_id')
             defect_type = detection.get('defect_type')
             
-            # skip if no bottle ID or if it's good
             if not bottle_id or bottle_id == "UNKNOWN" or defect_type == "good":
                 continue
-            
-            # skip if already logged this bottle
             if bottle_id in self.logged_bottles:
                 continue
-            
-            # mark as logged
             self.logged_bottles.add(bottle_id)
             self.total_defects += 1
-            
-            # save image if enabled
             image_path = None
             if self.save_images:
                 image_path = self._save_defect_image(frame, detection, bottle_id)
-            
-            # insert into database
             bbox = detection['bbox']
             self.database.insert_defect(
                 bottle_id=bottle_id,
@@ -239,7 +203,6 @@ class DefectDetector:
         filename = f"{bottle_id}_{timestamp}.jpg"
         filepath = os.path.join(self.images_dir, filename)
         
-        # crop to bounding box with some padding
         x, y, w, h = detection['bbox']
         padding = 20
         x1 = max(0, x - padding)
@@ -272,29 +235,20 @@ class DefectDetector:
             confidence = detection.get('confidence', 0.0)
             bottle_id = detection.get('bottle_id', 'N/A')
             
-            # color based on defect type
             if defect_type == "good":
-                color = (0, 255, 0)  # green
+                color = (0, 255, 0)
             else:
-                color = (0, 0, 255)  # red
-            
-            # draw bounding box
+                color = (0, 0, 255)
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-            
-            # draw label
             label = f"{bottle_id}: {defect_type}"
             if confidence > 0:
                 label += f" ({confidence:.2f})"
-            
-            # background for text
             (text_w, text_h), _ = cv2.getTextSize(
                 label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
             )
             cv2.rectangle(
                 frame, (x, y - text_h - 10), (x + text_w, y), color, -1
             )
-            
-            # draw text
             cv2.putText(
                 frame, label, (x, y - 5),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
@@ -341,12 +295,8 @@ class DefectDetector:
 
 
 if __name__ == "__main__":
-    # test detector
     detector = DefectDetector()
-    
-    # test with webcam
     cap = cv2.VideoCapture(1)
-    
     print("press 'q' to quit")
     
     while True:
@@ -356,7 +306,6 @@ if __name__ == "__main__":
         
         annotated_frame, detections = detector.detect_frame(frame)
         
-        # display stats
         stats = detector.get_stats()
         cv2.putText(
             annotated_frame, f"FPS: {stats['fps']:.1f}",

@@ -5,17 +5,16 @@ run this after collecting and labeling your dataset
 import os
 import sys
 
-# add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
 def train_model(
     data_yaml: str = "dataset/data.yaml",
-    model_size: str = "n",  # nano: fastest, smallest
+    model_size: str = "n",
     epochs: int = 100,
     img_size: int = 640,
     batch_size: int = 16,
-    device: str = "mps"  # mps for mac m4, cuda for nvidia, cpu for fallback
+    device: str = "mps"
 ):
     """train yolov8 model on bottle defect dataset
     
@@ -34,18 +33,13 @@ def train_model(
         print("install with: pip install ultralytics")
         return
     
-    # validate dataset exists
     if not os.path.exists(data_yaml):
         print(f"error: dataset config not found at {data_yaml}")
         print("make sure you've created and labeled your dataset")
         return
-    
-    # load pretrained model
     model_name = f"yolov8{model_size}.pt"
     print(f"loading pretrained model: {model_name}")
     model = YOLO(model_name)
-    
-    # train model
     print(f"\nstarting training...")
     print(f"epochs: {epochs}")
     print(f"image size: {img_size}")
@@ -62,7 +56,7 @@ def train_model(
         project="runs/detect",
         name="train",
         exist_ok=True,
-        patience=10,  # early stopping patience
+        patience=10,
         save=True,
         plots=True
     )
@@ -71,7 +65,6 @@ def train_model(
     print(f"best model saved to: runs/detect/train/weights/best.pt")
     print(f"copy to models directory: cp runs/detect/train/weights/best.pt models/best.pt")
     
-    # validate model
     print("\nrunning validation...")
     metrics = model.val()
     

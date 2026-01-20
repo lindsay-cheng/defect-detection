@@ -39,7 +39,6 @@ def export_to_csv(
         print("no records to export")
         return
     
-    # write to csv
     with open(output_path, 'w', newline='') as csvfile:
         fieldnames = records[0].keys()
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -128,7 +127,6 @@ def validate_dataset(data_yaml_path: str = "dataset/data.yaml"):
     print(f"number of classes: {config.get('nc', 'N/A')}")
     print(f"class names: {config.get('names', [])}")
     
-    # check if image directories exist
     for split in ['train', 'val', 'test']:
         img_dir = os.path.join(config.get('path', ''), 'images', split)
         label_dir = os.path.join(config.get('path', ''), 'labels', split)

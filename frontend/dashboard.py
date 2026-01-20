@@ -10,24 +10,18 @@ class InspectionDashboard:
         self.root.geometry("1280x720")
         self.root.configure(bg="#e0e0e0")
         
-        # stats
         self.fps = 0
         self.inspected = 0
         self.fails = 0
-        
-        # current inspection data
         self.current_id = "BTL_00000"
         self.current_fill = "0.0%"
         self.current_defect = ""
         self.current_status = ""
-        
-        # recent failures list
         self.failures = []
         
         self.setup_ui()
         
     def setup_ui(self):
-        # top status bar
         status_frame = tk.Frame(self.root, bg="#4a7c59", height=40)
         status_frame.pack(fill=tk.X, side=tk.TOP)
         status_frame.pack_propagate(False)
@@ -51,15 +45,12 @@ class InspectionDashboard:
                                    fg="white", font=("Arial", 10))
         self.fails_label.pack(side=tk.LEFT, padx=10)
         
-        # main content area
         content_frame = tk.Frame(self.root, bg="#e0e0e0")
         content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # left side - live feed and recent failures
         left_frame = tk.Frame(content_frame, bg="#e0e0e0")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         
-        # live feed
         feed_frame = tk.LabelFrame(left_frame, text="Live Feed", bg="#f5f5f5", 
                                   fg="black", font=("Arial", 10), relief=tk.GROOVE, bd=2)
         feed_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -67,12 +58,9 @@ class InspectionDashboard:
         self.video_label = tk.Label(feed_frame, bg="black")
         self.video_label.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # recent failures
         failures_frame = tk.LabelFrame(left_frame, text="Recent Failures", 
                                       bg="#f5f5f5", fg="black", font=("Arial", 10), relief=tk.GROOVE, bd=2)
         failures_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # scrollable text widget for failures
         scroll = tk.Scrollbar(failures_frame)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         
@@ -82,12 +70,10 @@ class InspectionDashboard:
         self.failures_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         scroll.config(command=self.failures_text.yview)
         
-        # right side - current inspection and controls
         right_frame = tk.Frame(content_frame, bg="#e0e0e0", width=400)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(5, 0))
         right_frame.pack_propagate(False)
         
-        # current inspection
         inspection_frame = tk.LabelFrame(right_frame, text="Current Inspection", 
                                         bg="#f5f5f5", fg="black", font=("Arial", 10), relief=tk.GROOVE, bd=2)
         inspection_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -95,21 +81,18 @@ class InspectionDashboard:
         info_frame = tk.Frame(inspection_frame, bg="#f5f5f5")
         info_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # id
         tk.Label(info_frame, text="ID:", bg="#f5f5f5", fg="black", 
                 font=("Arial", 10), anchor="w").grid(row=0, column=0, sticky="w", pady=5)
         self.id_label = tk.Label(info_frame, text=self.current_id, bg="#f5f5f5", 
                                 fg="black", font=("Arial", 10, "bold"), anchor="w")
         self.id_label.grid(row=0, column=1, sticky="w", pady=5, padx=(10, 0))
         
-        # fill
         tk.Label(info_frame, text="Fill:", bg="#f5f5f5", fg="black", 
                 font=("Arial", 10), anchor="w").grid(row=1, column=0, sticky="w", pady=5)
         self.fill_label = tk.Label(info_frame, text=self.current_fill, bg="#f5f5f5", 
                                   fg="#4CAF50", font=("Arial", 10, "bold"), anchor="w")
         self.fill_label.grid(row=1, column=1, sticky="w", pady=5, padx=(10, 0))
         
-        # defect
         tk.Label(info_frame, text="Defect:", bg="#f5f5f5", fg="black", 
                 font=("Arial", 10), anchor="w").grid(row=2, column=0, sticky="nw", pady=5)
         self.defect_label = tk.Label(info_frame, text=self.current_defect, bg="#f5f5f5", 
@@ -117,14 +100,12 @@ class InspectionDashboard:
                                     wraplength=280, justify="left")
         self.defect_label.grid(row=2, column=1, sticky="w", pady=5, padx=(10, 0))
         
-        # status
         tk.Label(info_frame, text="Status:", bg="#f5f5f5", fg="black", 
                 font=("Arial", 10), anchor="w").grid(row=3, column=0, sticky="w", pady=5)
         self.status_label = tk.Label(info_frame, text=self.current_status, bg="#f5f5f5", 
                                     fg="#f44336", font=("Arial", 10, "bold"), anchor="w")
         self.status_label.grid(row=3, column=1, sticky="w", pady=5, padx=(10, 0))
         
-        # controls
         controls_frame = tk.LabelFrame(right_frame, text="Controls", bg="#f5f5f5", 
                                       fg="black", font=("Arial", 10), relief=tk.GROOVE, bd=2)
         controls_frame.pack(fill=tk.BOTH, expand=True)
@@ -132,7 +113,6 @@ class InspectionDashboard:
         button_frame = tk.Frame(controls_frame, bg="#f5f5f5")
         button_frame.pack(pady=20)
         
-        # start/stop buttons row
         control_buttons_frame = tk.Frame(button_frame, bg="#f5f5f5")
         control_buttons_frame.pack(pady=(0, 15))
         
@@ -149,7 +129,6 @@ class InspectionDashboard:
                                   font=("Arial", 11), padx=20, pady=5)
         self.stop_label.pack()
         
-        # stats button
         self.stats_button = tk.Frame(button_frame, bg="#f5f5f5", highlightbackground="#999999",
                                     highlightthickness=1, cursor="hand2")
         self.stats_button.pack(pady=5)
@@ -157,7 +136,6 @@ class InspectionDashboard:
                                    font=("Arial", 10), padx=30, pady=3)
         self.stats_label.pack()
         
-        # export button
         self.export_button = tk.Frame(button_frame, bg="#f5f5f5", highlightbackground="#999999",
                                      highlightthickness=1, cursor="hand2")
         self.export_button.pack(pady=5)
@@ -176,18 +154,13 @@ class InspectionDashboard:
         args:
             frame: opencv frame in BGR format
         """
-        # convert to rgb
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # resize to fit display
         h, w = frame.shape[:2]
         max_width = 740
         max_height = 420
         scale = min(max_width/w, max_height/h)
         new_w, new_h = int(w*scale), int(h*scale)
         frame = cv2.resize(frame, (new_w, new_h))
-        
-        # convert to tkinter format
         img = Image.fromarray(frame)
         imgtk = ImageTk.PhotoImage(image=img)
         self.video_label.imgtk = imgtk
@@ -239,10 +212,7 @@ class InspectionDashboard:
         stats_window.geometry("400x300")
         stats_window.configure(bg="#f5f5f5")
         
-        # get database stats
         db_stats = database.get_statistics(hours=24)
-        
-        # create stats display
         text = tk.Text(
             stats_window,
             bg="white",
@@ -252,8 +222,6 @@ class InspectionDashboard:
             pady=20
         )
         text.pack(fill=tk.BOTH, expand=True)
-        
-        # format stats
         stats_text = "=== statistics (last 24 hours) ===\n\n"
         stats_text += f"total defects: {db_stats['total_defects']}\n\n"
         stats_text += "defects by type:\n"

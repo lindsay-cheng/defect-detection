@@ -18,7 +18,6 @@ class DefectDatabase:
         """
         self.db_path = db_path
         
-        # create database directory if it doesn't exist
         db_dir = os.path.dirname(db_path)
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir)
@@ -35,7 +34,6 @@ class DefectDatabase:
     
     def _create_tables(self):
         """create bottles and defect tables if they don't exist"""
-        # bottles table - one entry per unique bottle
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS bottles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +44,6 @@ class DefectDatabase:
             )
         """)
         
-        # defect table - references bottles table
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS defect (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +60,6 @@ class DefectDatabase:
             )
         """)
         
-        # create indexes for faster queries
         self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_bottles_id_bottle ON bottles(id_bottle)
         """)
@@ -96,7 +92,6 @@ class DefectDatabase:
         """
         timestamp = datetime.now().isoformat()
         
-        # check if bottle already exists
         self.cursor.execute(
             "SELECT id FROM bottles WHERE id_bottle = ?",
             (bottle_id,)
@@ -104,7 +99,6 @@ class DefectDatabase:
         result = self.cursor.fetchone()
         
         if result:
-            # update status if it's now a fail
             if status == "FAIL":
                 self.cursor.execute(
                     "UPDATE bottles SET status = ? WHERE id_bottle = ?",
@@ -112,8 +106,6 @@ class DefectDatabase:
                 )
                 self.connection.commit()
             return result[0]
-        
-        # insert new bottle
         self.cursor.execute("""
             INSERT INTO bottles (id_bottle, production_lot, timestamp, status)
             VALUES (?, ?, ?, ?)
@@ -146,7 +138,6 @@ class DefectDatabase:
         """
         timestamp = datetime.now().isoformat()
         
-        # ensure bottle exists and get its primary key
         bottle_pk = self.insert_bottle(bottle_id, production_lot, status="FAIL")
         
         bbox_x, bbox_y, bbox_w, bbox_h = bbox if bbox else (None, None, None, None)
