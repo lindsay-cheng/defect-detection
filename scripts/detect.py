@@ -1,0 +1,134 @@
+"""
+standalone detection script for testing
+can run without the gui for quick testing
+"""
+import cv2
+import os
+import sys
+
+# add parent directory to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from backend.detector import DefectDetector
+
+
+def detect_live(
+    model_path: str = None,
+    source: int = 0,
+    conf_threshold: float = 0.5,
+    save_detections: bool = True,
+    log_to_db: bool = True
+):
+    """run real-time detection on video source
+    
+    args:
+        model_path: path to trained model (None for testing without model)
+        source: video source (0 for webcam, or path to video file)
+        conf_threshold: confidence threshold
+        save_detections: save defect images
+        log_to_db: log defects to database
+    """
+    # initialize detector
+    detector = DefectDetector(
+        model_path=model_path,
+        conf_threshold=conf_threshold,
+        save_images=save_detections
+    )
+    
+    # open video source
+    cap = cv2.VideoCapture(source)
+    
+    if not cap.isOpened():
+        print(f"error: could not open video source {source}")
+        return
+    
+    print("detection started. press 'q' to quit, 'r' to reset stats")
+    
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("end of video or cannot read frame")
+                break
+            
+            # run detection
+            annotated_frame, detections = detector.detect_frame(frame)
+            
+            # get stats
+            stats = detector.get_stats()
+            
+            # display stats on frame
+            cv2.putText(
+                annotated_frame,
+                f"FPS: {stats['fps']:.1f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 0),
+                2
+            )
+            
+            cv2.putText(
+                annotated_frame,
+                f"inspected: {stats['total_inspected']} | defects: {stats['total_defects']}",
+                (10, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2
+            )
+            
+            # display
+            cv2.imshow("bottle defect detection", annotated_frame)
+            
+            # handle keyboard input
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            elif key == ord('r'):
+                detector.reset_stats()
+                print("stats reset")
+    
+    except KeyboardInterrupt:
+        print("\ndetection stopped by user")
+    
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        detector.cleanup()
+        
+        # print final stats
+        stats = detector.get_stats()
+        print("\n=== final statistics ===")
+        print(f"total inspected: {stats['total_inspected']}")
+        print(f"total defects: {stats['total_defects']}")
+        print(f"defect rate: {stats['defect_rate']:.2%}")
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="run bottle defect detection")
+    parser.add_argument("--model", type=str, default=None,
+                       help="path to trained model (optional for testing)")
+    parser.add_argument("--source", type=str, default="0",
+                       help="video source (0 for webcam, or video file path)")
+    parser.add_argument("--conf", type=float, default=0.5,
+                       help="confidence threshold")
+    parser.add_argument("--no-save", action="store_true",
+                       help="don't save defect images")
+    parser.add_argument("--no-db", action="store_true",
+                       help="don't log to database")
+    
+    args = parser.parse_args()
+    
+    # parse source
+    source = 0 if args.source == "0" else args.source
+    
+    detect_live(
+        model_path=args.model,
+        source=source,
+        conf_threshold=args.conf,
+        save_detections=not args.no_save,
+        log_to_db=not args.no_db
+    )
