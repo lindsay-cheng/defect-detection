@@ -23,6 +23,7 @@ detections/
 output_processed.mp4
 *.csv
 defect_report.csv
+video.mov
 
 # Python
 __pycache__/
