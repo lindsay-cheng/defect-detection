@@ -13,7 +13,7 @@ from backend.detector import DefectDetector
 class DefectDetectionApp:
     """main application integrating frontend and backend"""
     
-    def __init__(self, video_path="video.mp4"):
+    def __init__(self, video_path="video.mov"):
         """initialize application
         
         args:
@@ -177,5 +177,5 @@ class DefectDetectionApp:
 if __name__ == "__main__":
     from backend.database import init_database
     init_database()
-    app = DefectDetectionApp(video_path="video.mp4")
+    app = DefectDetectionApp(video_path="video.mov")
     app.run()

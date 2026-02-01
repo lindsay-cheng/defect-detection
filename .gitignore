@@ -6,9 +6,9 @@ dataset/data/
 dataset/raw/
 data/raw/
 
-# Model weights (too large for git)
+# Model weights
 *.pt
-!yolov8n.pt  # Keep base model if small enough
+!yolov8n.pt 
 !my_model/*.pt
 !my_model/**/*.pt
 models/*.pt
