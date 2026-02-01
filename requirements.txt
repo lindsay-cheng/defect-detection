@@ -1,7 +1,7 @@
 # core dependencies
-opencv-python==4.8.1.78
-numpy==1.24.3
-pillow==10.1.0
+opencv-python>=4.9.0
+numpy>=1.26.0
+pillow>=10.2.0
 
 # deep learning
 torch>=2.1.0
@@ -14,5 +14,5 @@ ultralytics>=8.0.220  # yolo framework
 # tkinter is built into python
 
 # utilities
-scipy==1.11.4  # for centroid tracking calculations
-pyyaml==6.0.1  # for dataset config parsing
+scipy>=1.13.0  # for centroid tracking calculations
+pyyaml>=6.0.1  # for dataset config parsing
