@@ -22,9 +22,6 @@ This system uses YOLOv8 object detection to automatically detect and classify de
 
 The custom YOLOv8n model achieves >99% mAP@0.5 on an 80/20 stratified train/val split. Dataset consists of ~300 images captured with varied camera angles, zoom levels, lighting, and positions. While these metrics demonstrate the model's capability to learn defect patterns, the small dataset size and single-environment capture may limit generalization.
 
-![Training Batch Examples](my_model/train/train_batch1260.jpg)
-*Example training batch showing augmented images with ground-truth labels*
-
 ![Training Results](my_model/train/results.png)
 *Training metrics over 100 epochs showing convergence*
 
