@@ -1,9 +1,9 @@
 """
 database module for storing defect detection records
 """
-import sqlite3
 import os
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 
@@ -11,26 +11,17 @@ class DefectDatabase:
     """manages sqlite database for defect logging"""
     
     def __init__(self, db_path: str = "database/defects.db"):
-        """initialize database connection
+        """initialize database connection and ensure schema exists
         
         args:
             db_path: path to sqlite database file
         """
         self.db_path = db_path
+        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         
-        db_dir = os.path.dirname(db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir)
-        
-        self.connection = None
-        self.cursor = None
-        self._connect()
-        self._create_tables()
-    
-    def _connect(self):
-        """establish database connection"""
-        self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.connection = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.connection.cursor()
+        self._create_tables()
     
     def _create_tables(self):
         """create bottles and defect tables if they don't exist"""
@@ -60,57 +51,37 @@ class DefectDatabase:
             )
         """)
         
-        self.cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bottles_id_bottle ON bottles(id_bottle)
-        """)
-        
-        self.cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_defect_id_bottle ON defect(id_bottle)
-        """)
-        
-        self.cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_defect_timestamp ON defect(timestamp)
-        """)
-        
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_bottles_id_bottle ON bottles(id_bottle)")
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_defect_id_bottle ON defect(id_bottle)")
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_defect_timestamp ON defect(timestamp)")
         self.connection.commit()
     
-    def insert_bottle(
-        self,
-        bottle_id: str,
-        production_lot: str = None,
-        status: str = "PASS"
-    ) -> int:
+    def insert_bottle(self, bottle_id: str, production_lot: str = None, status: str = "PASS") -> int:
         """insert or get existing bottle record
         
         args:
-            bottle_id: unique bottle identifier (e.g., BTL_00001)
+            bottle_id: unique bottle identifier (e.g. BTL_00001)
             production_lot: production lot number
             status: PASS or FAIL
         
         returns:
             bottle's primary key id
         """
-        timestamp = datetime.now().isoformat()
-        
-        self.cursor.execute(
-            "SELECT id FROM bottles WHERE id_bottle = ?",
-            (bottle_id,)
-        )
+        self.cursor.execute("SELECT id FROM bottles WHERE id_bottle = ?", (bottle_id,))
         result = self.cursor.fetchone()
         
         if result:
+            # update status to FAIL if needed (never downgrade FAIL -> PASS)
             if status == "FAIL":
-                self.cursor.execute(
-                    "UPDATE bottles SET status = ? WHERE id_bottle = ?",
-                    (status, bottle_id)
-                )
+                self.cursor.execute("UPDATE bottles SET status = ? WHERE id_bottle = ?", (status, bottle_id))
                 self.connection.commit()
             return result[0]
-        self.cursor.execute("""
-            INSERT INTO bottles (id_bottle, production_lot, timestamp, status)
-            VALUES (?, ?, ?, ?)
-        """, (bottle_id, production_lot, timestamp, status))
         
+        timestamp = datetime.now().isoformat()
+        self.cursor.execute(
+            "INSERT INTO bottles (id_bottle, production_lot, timestamp, status) VALUES (?, ?, ?, ?)",
+            (bottle_id, production_lot, timestamp, status)
+        )
         self.connection.commit()
         return self.cursor.lastrowid
     
@@ -123,10 +94,10 @@ class DefectDatabase:
         production_lot: str = None,
         bbox: tuple = None
     ) -> int:
-        """insert a defect record into the database
+        """insert a defect record (also upserts the bottle as FAIL)
         
         args:
-            bottle_id: unique identifier for the bottle (e.g., BTL_00001)
+            bottle_id: unique identifier for the bottle (e.g. BTL_00001)
             defect_type: type of defect
             confidence: detection confidence score (0-1)
             image_path: path to saved defect image
@@ -136,21 +107,18 @@ class DefectDatabase:
         returns:
             inserted defect record id
         """
-        timestamp = datetime.now().isoformat()
-        
         bottle_pk = self.insert_bottle(bottle_id, production_lot, status="FAIL")
         
         bbox_x, bbox_y, bbox_w, bbox_h = bbox if bbox else (None, None, None, None)
+        timestamp = datetime.now().isoformat()
         
         self.cursor.execute("""
             INSERT INTO defect (
                 id_bottle, defect_type, confidence, image_path,
                 timestamp, bbox_x, bbox_y, bbox_w, bbox_h
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            bottle_pk, defect_type, confidence, image_path,
-            timestamp, bbox_x, bbox_y, bbox_w, bbox_h
-        ))
+        """, (bottle_pk, defect_type, confidence, image_path,
+              timestamp, bbox_x, bbox_y, bbox_w, bbox_h))
         
         self.connection.commit()
         return self.cursor.lastrowid
@@ -175,17 +143,10 @@ class DefectDatabase:
         """
         query = """
             SELECT 
-                defect.id,
-                bottles.id_bottle,
-                bottles.production_lot,
-                defect.defect_type,
-                defect.confidence,
-                defect.image_path,
-                defect.timestamp,
-                defect.bbox_x,
-                defect.bbox_y,
-                defect.bbox_w,
-                defect.bbox_h
+                defect.id, bottles.id_bottle, bottles.production_lot,
+                defect.defect_type, defect.confidence, defect.image_path,
+                defect.timestamp, defect.bbox_x, defect.bbox_y,
+                defect.bbox_w, defect.bbox_h
             FROM defect
             JOIN bottles ON defect.id_bottle = bottles.id
             WHERE 1=1
@@ -195,11 +156,9 @@ class DefectDatabase:
         if defect_type:
             query += " AND defect.defect_type = ?"
             params.append(defect_type)
-        
         if start_date:
             query += " AND defect.timestamp >= ?"
             params.append(start_date)
-        
         if end_date:
             query += " AND defect.timestamp <= ?"
             params.append(end_date)
@@ -208,32 +167,15 @@ class DefectDatabase:
         params.append(limit)
         
         self.cursor.execute(query, params)
-        
         columns = [desc[0] for desc in self.cursor.description]
-        results = []
-        
-        for row in self.cursor.fetchall():
-            results.append(dict(zip(columns, row)))
-        
-        return results
+        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
     
     def get_defect_by_bottle_id(self, bottle_id: str) -> Optional[Dict[str, Any]]:
-        """get defect record for a specific bottle
-        
-        args:
-            bottle_id: unique bottle identifier (e.g., BTL_00001)
-        
-        returns:
-            defect record or None if not found
-        """
+        """get the most recent defect record for a specific bottle"""
         self.cursor.execute("""
             SELECT 
-                defect.id,
-                bottles.id_bottle,
-                bottles.production_lot,
-                defect.defect_type,
-                defect.confidence,
-                defect.image_path,
+                defect.id, bottles.id_bottle, bottles.production_lot,
+                defect.defect_type, defect.confidence, defect.image_path,
                 defect.timestamp
             FROM defect
             JOIN bottles ON defect.id_bottle = bottles.id
@@ -250,40 +192,20 @@ class DefectDatabase:
         return dict(zip(columns, row))
     
     def get_statistics(self, hours: int = 24) -> Dict[str, Any]:
-        """get defect statistics for the last n hours
-        
-        args:
-            hours: number of hours to look back
-        
-        returns:
-            statistics dictionary
-        """
-        # calculate start time
-        from datetime import timedelta
+        """get defect statistics for the last n hours"""
         start_time = (datetime.now() - timedelta(hours=hours)).isoformat()
         
-        # total bottles inspected
-        self.cursor.execute(
-            "SELECT COUNT(*) FROM bottles WHERE timestamp >= ?",
-            (start_time,)
-        )
+        self.cursor.execute("SELECT COUNT(*) FROM bottles WHERE timestamp >= ?", (start_time,))
         total_bottles = self.cursor.fetchone()[0]
         
-        # total defects
-        self.cursor.execute(
-            "SELECT COUNT(*) FROM defect WHERE timestamp >= ?",
-            (start_time,)
-        )
+        self.cursor.execute("SELECT COUNT(*) FROM defect WHERE timestamp >= ?", (start_time,))
         total_defects = self.cursor.fetchone()[0]
         
-        # defects by type
         self.cursor.execute("""
             SELECT defect_type, COUNT(*) as count
-            FROM defect
-            WHERE timestamp >= ?
+            FROM defect WHERE timestamp >= ?
             GROUP BY defect_type
         """, (start_time,))
-        
         defects_by_type = {row[0]: row[1] for row in self.cursor.fetchall()}
         
         return {
@@ -294,7 +216,7 @@ class DefectDatabase:
         }
     
     def clear_all_records(self):
-        """delete all records from the database (use with caution)"""
+        """delete all records from the database"""
         self.cursor.execute("DELETE FROM defect")
         self.cursor.execute("DELETE FROM bottles")
         self.connection.commit()
@@ -305,27 +227,15 @@ class DefectDatabase:
             self.connection.close()
     
     def __enter__(self):
-        """context manager entry"""
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """context manager exit"""
         self.close()
 
 
-# helper function for quick database initialization
 def init_database(db_path: str = "database/defects.db"):
-    """initialize database with proper schema
-    
-    args:
-        db_path: path to database file
-    """
+    """initialize database with proper schema (creates tables if needed)"""
     db = DefectDatabase(db_path)
     db.close()
     print(f"database initialized at: {db_path}")
     return db_path
-
-
-if __name__ == "__main__":
-    # test database creation
-    init_database()
