@@ -31,7 +31,7 @@ The custom YOLOv8n model achieves >99% mAP@0.5 on an 80/20 stratified train/val 
 - Single capture environment may not generalize to diverse production settings
 - Model performance on real-world manufacturing data remains to be validated
 
-**Future Work:**
+**WIP:**
 - Expand dataset across multiple environments and bottle types
 - Implement more robust tracking algorithm
 - K-fold cross-validation to better assess model robustness
