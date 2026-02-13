@@ -11,6 +11,7 @@ This system uses YOLOv8 object detection to automatically detect and classify de
 - images were collected by me and annotated in YOLO format
 - dataset config: `dataset/data.yaml`
 - classes are defined by the trained model and `dataset/data.yaml`
+- trained on external Google Colab for GPU access
 
 ## Defect classes
 - `good`

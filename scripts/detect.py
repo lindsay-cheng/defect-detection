@@ -1,6 +1,6 @@
 """
-standalone detection script for testing
-can run without the gui for quick testing
+standalone detection script — runs inference in an opencv window (no gui)
+useful for quick testing without the full tkinter dashboard
 """
 import cv2
 import os
@@ -15,17 +15,15 @@ def detect_live(
     model_path: str = None,
     source: int = 0,
     conf_threshold: float = 0.5,
-    save_detections: bool = True,
-    log_to_db: bool = True
+    save_detections: bool = True
 ):
-    """run real-time detection on video source
+    """run real-time detection on a video source
     
     args:
-        model_path: path to trained model (None for testing without model)
+        model_path: path to trained model (None runs without a model)
         source: video source (0 for webcam, or path to video file)
         conf_threshold: confidence threshold
-        save_detections: save defect images
-        log_to_db: log defects to database
+        save_detections: save defect images to disk
     """
     detector = DefectDetector(
         model_path=model_path,
@@ -49,27 +47,19 @@ def detect_live(
             
             annotated_frame, detections = detector.detect_frame(frame)
             stats = detector.get_stats()
-            cv2.putText(
-                annotated_frame,
-                f"FPS: {stats['fps']:.1f}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                2
-            )
             
+            cv2.putText(
+                annotated_frame, f"FPS: {stats['fps']:.1f}",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+            )
             cv2.putText(
                 annotated_frame,
                 f"inspected: {stats['total_inspected']} | defects: {stats['total_defects']}",
-                (10, 70),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 0),
-                2
+                (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
             )
             
             cv2.imshow("bottle defect detection", annotated_frame)
+            
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
@@ -104,17 +94,13 @@ if __name__ == "__main__":
                        help="confidence threshold")
     parser.add_argument("--no-save", action="store_true",
                        help="don't save defect images")
-    parser.add_argument("--no-db", action="store_true",
-                       help="don't log to database")
     
     args = parser.parse_args()
-    
     source = 0 if args.source == "0" else args.source
     
     detect_live(
         model_path=args.model,
         source=source,
         conf_threshold=args.conf,
-        save_detections=not args.no_save,
-        log_to_db=not args.no_db
+        save_detections=not args.no_save
     )
