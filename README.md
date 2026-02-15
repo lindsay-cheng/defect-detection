@@ -6,6 +6,8 @@ Automated visual inspection system for identifying defects in plastic bottles us
 
 This system uses YOLOv8 object detection to automatically detect and classify defective bottles in real-time. Designed for quality control in manufacturing environments.
 
+![Training Results](assets/defectdetectionscreenie.png)
+
 ## Training (image collection)
 
 - images were collected by me and annotated in YOLO format
@@ -22,8 +24,6 @@ This system uses YOLOv8 object detection to automatically detect and classify de
 ## Preliminary Results (Controlled Environment)
 
 The custom YOLOv8n model achieves >99% mAP@0.5 on an 80/20 stratified train/val split. Dataset consists of ~300 images captured with varied camera angles, zoom levels, lighting, and positions. While these metrics demonstrate the model's capability to learn defect patterns, the small dataset size and single-environment capture may limit generalization.
-
-![Training Results](assets/defectdetectionscreenie.png)
 
 ![Training Results](my_model/train/results.png)
 *Training metrics over 100 epochs showing convergence*
