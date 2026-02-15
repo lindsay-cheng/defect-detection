@@ -143,9 +143,20 @@ class DefectDetectionApp:
         self.root.after(30, self._poll_frames)  # ~33 fps
     
     def _export_callback(self):
-        """callback for exporting defect data to csv"""
-        from scripts.utils import export_to_csv
-        export_to_csv(output_path="defect_report.csv")
+        """callback for exporting defect data to csv (runs in background to keep UI responsive)"""
+        def export_task():
+            from scripts.utils import export_to_csv
+            try:
+                export_to_csv(output_path="defect_report.csv")
+                # schedule UI update on main thread
+                self.root.after(0, lambda: self.dashboard._show_export_success())
+            except Exception as e:
+                # schedule UI update on main thread
+                self.root.after(0, lambda: self.dashboard._show_export_error(str(e)))
+        
+        # run export in background thread to avoid blocking UI
+        export_thread = threading.Thread(target=export_task, daemon=True)
+        export_thread.start()
     
     def on_closing(self):
         """handle application close"""
@@ -161,16 +172,6 @@ class DefectDetectionApp:
 
 if __name__ == "__main__":
     from backend.database import init_database
-    
-    print("\n" + "="*60)
-    print("🏭 BOTTLE DEFECT DETECTION SYSTEM")
-    print("="*60)
-    print("Watch the terminal to see what's happening behind the scenes!")
-    print("Look for these markers:")
-    print("  🔍 = YOLO model detected something")
-    print("  → = Tracker assigned a bottle ID")
-    print("  💾 = Defect logged to database")
-    print("="*60 + "\n")
     
     init_database()
     app = DefectDetectionApp(video_path="assets/video2.mov")

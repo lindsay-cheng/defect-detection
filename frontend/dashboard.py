@@ -239,8 +239,13 @@ class InspectionDashboard:
     
     def export_data(self, export_callback):
         """trigger a csv export via the provided callback"""
-        try:
-            export_callback()
-            messagebox.showinfo("export successful", "data exported to defect_report.csv")
-        except Exception as e:
-            messagebox.showerror("export failed", f"error: {str(e)}")
+        # callback now handles async export + UI updates
+        export_callback()
+    
+    def _show_export_success(self):
+        """show export success message (called from main thread)"""
+        messagebox.showinfo("export successful", "data exported to defect_report.csv")
+    
+    def _show_export_error(self, error_msg: str):
+        """show export error message (called from main thread)"""
+        messagebox.showerror("export failed", f"error: {error_msg}")
