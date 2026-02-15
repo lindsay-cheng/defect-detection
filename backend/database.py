@@ -1,16 +1,19 @@
 """
 database module for storing defect detection records
+thread-safe implementation using a dedicated DB worker thread
 """
 import os
 import sqlite3
+import threading
+from queue import Queue, Empty
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 
-class DefectDatabase:
-    """manages sqlite database for defect logging"""
+class _DefectDatabaseCore:
+    """core sqlite operations (runs only on DB worker thread)"""
     
-    def __init__(self, db_path: str = "database/defects.db"):
+    def __init__(self, db_path: str):
         """initialize database connection and ensure schema exists
         
         args:
@@ -19,7 +22,8 @@ class DefectDatabase:
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         
-        self.connection = sqlite3.connect(db_path, check_same_thread=False)
+        # use default check_same_thread=True since this runs on single thread
+        self.connection = sqlite3.connect(db_path)
         self.cursor = self.connection.cursor()
         self._create_tables()
     
@@ -225,6 +229,126 @@ class DefectDatabase:
         """close database connection"""
         if self.connection:
             self.connection.close()
+
+
+class DefectDatabase:
+    """thread-safe facade for defect database operations"""
+    
+    _SENTINEL = object()
+    
+    def __init__(self, db_path: str = "database/defects.db"):
+        """initialize thread-safe database wrapper
+        
+        args:
+            db_path: path to sqlite database file
+        """
+        self.db_path = db_path
+        self._request_queue = Queue()
+        self._worker_thread_id = None
+        self._stopped = False
+        
+        # start the worker thread
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop,
+            daemon=True,
+            name="DBWorker"
+        )
+        self._worker_thread.start()
+    
+    def _worker_loop(self):
+        """worker thread main loop (processes DB requests)"""
+        self._worker_thread_id = threading.get_ident()
+        core = _DefectDatabaseCore(self.db_path)
+        
+        try:
+            while True:
+                task = self._request_queue.get()
+                
+                # check for shutdown sentinel
+                if task is self._SENTINEL:
+                    break
+                
+                method_name, args, kwargs, response_queue = task
+                
+                try:
+                    result = getattr(core, method_name)(*args, **kwargs)
+                    response_queue.put((True, result))
+                except Exception as e:
+                    response_queue.put((False, e))
+        finally:
+            core.close()
+    
+    def _execute(self, method_name: str, *args, **kwargs):
+        """execute a DB operation via the worker thread
+        
+        args:
+            method_name: name of the core method to call
+            *args, **kwargs: arguments to pass to the method
+        
+        returns:
+            result from the DB operation
+        """
+        # reentrancy guard: if called from worker thread, execute directly
+        if threading.get_ident() == self._worker_thread_id:
+            raise RuntimeError("cannot call DB methods from within DB worker thread")
+        
+        if self._stopped:
+            raise RuntimeError("database has been closed")
+        
+        response_queue = Queue(maxsize=1)
+        self._request_queue.put((method_name, args, kwargs, response_queue))
+        
+        ok, value = response_queue.get()
+        if not ok:
+            raise value
+        return value
+    
+    def insert_bottle(self, bottle_id: str, production_lot: str = None, status: str = "PASS") -> int:
+        """insert or get existing bottle record (thread-safe)"""
+        return self._execute("insert_bottle", bottle_id, production_lot, status)
+    
+    def insert_defect(
+        self,
+        bottle_id: str,
+        defect_type: str,
+        confidence: float = None,
+        image_path: str = None,
+        production_lot: str = None,
+        bbox: tuple = None
+    ) -> int:
+        """insert a defect record (thread-safe)"""
+        return self._execute("insert_defect", bottle_id, defect_type, confidence, image_path, production_lot, bbox)
+    
+    def get_defects(
+        self,
+        limit: int = 100,
+        defect_type: str = None,
+        start_date: str = None,
+        end_date: str = None
+    ) -> List[Dict[str, Any]]:
+        """retrieve defect records with optional filtering (thread-safe)"""
+        return self._execute("get_defects", limit, defect_type, start_date, end_date)
+    
+    def get_defect_by_bottle_id(self, bottle_id: str) -> Optional[Dict[str, Any]]:
+        """get the most recent defect record for a specific bottle (thread-safe)"""
+        return self._execute("get_defect_by_bottle_id", bottle_id)
+    
+    def get_statistics(self, hours: int = 24) -> Dict[str, Any]:
+        """get defect statistics for the last n hours (thread-safe)"""
+        return self._execute("get_statistics", hours)
+    
+    def clear_all_records(self):
+        """delete all records from the database (thread-safe)"""
+        return self._execute("clear_all_records")
+    
+    def close(self):
+        """shutdown the worker thread and close database connection"""
+        if self._stopped:
+            return
+        
+        self._stopped = True
+        self._request_queue.put(self._SENTINEL)
+        self._worker_thread.join(timeout=5.0)
     
     def __enter__(self):
         return self
