@@ -9,7 +9,6 @@ from queue import Queue
 from frontend.dashboard import InspectionDashboard
 from backend.detector import DefectDetector
 
-
 class DefectDetectionApp:
     """main application integrating frontend and backend"""
     
@@ -162,6 +161,17 @@ class DefectDetectionApp:
 
 if __name__ == "__main__":
     from backend.database import init_database
+    
+    print("\n" + "="*60)
+    print("🏭 BOTTLE DEFECT DETECTION SYSTEM")
+    print("="*60)
+    print("Watch the terminal to see what's happening behind the scenes!")
+    print("Look for these markers:")
+    print("  🔍 = YOLO model detected something")
+    print("  → = Tracker assigned a bottle ID")
+    print("  💾 = Defect logged to database")
+    print("="*60 + "\n")
+    
     init_database()
-    app = DefectDetectionApp(video_path="video2.mov")
+    app = DefectDetectionApp(video_path="assets/video2.mov")
     app.run()
