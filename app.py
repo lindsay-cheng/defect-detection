@@ -169,7 +169,6 @@ class DefectDetectionApp:
             0,
             self.dashboard.update_current_inspection,
             display_id,
-            "N/A",
             defect_type,
             status,
         )

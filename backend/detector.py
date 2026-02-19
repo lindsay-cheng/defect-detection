@@ -150,7 +150,7 @@ class DefectDetector:
         results = self.model.track(
             frame,
             persist=True,
-            tracker="backend/trackers/botsort.yaml",
+            tracker="backend/trackers/bytetrack.yaml",
             conf=self.conf_threshold,
             verbose=False
         )
