@@ -4,12 +4,13 @@ utility functions for the defect detection system
 import csv
 from typing import List, Dict, Any
 
+from backend.constants import DEFAULT_DB_PATH
 from backend.database import DefectDatabase
 
 
 def export_to_csv(
     output_path: str = "defect_report.csv",
-    db_path: str = "database/defects.db",
+    db_path: str = DEFAULT_DB_PATH,
     limit: int = 1000
 ):
     """export defect records from the database to a csv file
@@ -19,9 +20,8 @@ def export_to_csv(
         db_path: path to database file
         limit: max number of records to export
     """
-    db = DefectDatabase(db_path)
-    records = db.get_defects(limit=limit)
-    db.close()
+    with DefectDatabase(db_path) as db:
+        records = db.get_defects(limit=limit)
     
     if not records:
         print("no records to export")
@@ -35,11 +35,10 @@ def export_to_csv(
     print(f"exported {len(records)} records to {output_path}")
 
 
-def get_database_stats(db_path: str = "database/defects.db", hours: int = 24):
+def get_database_stats(db_path: str = DEFAULT_DB_PATH, hours: int = 24):
     """print defect statistics for the last n hours"""
-    db = DefectDatabase(db_path)
-    stats = db.get_statistics(hours=hours)
-    db.close()
+    with DefectDatabase(db_path) as db:
+        stats = db.get_statistics(hours=hours)
     
     print(f"\n=== defect statistics (last {hours} hours) ===")
     print(f"total defects: {stats['total_defects']}")
@@ -49,13 +48,12 @@ def get_database_stats(db_path: str = "database/defects.db", hours: int = 24):
     print()
 
 
-def clear_database(db_path: str = "database/defects.db"):
+def clear_database(db_path: str = DEFAULT_DB_PATH):
     """clear all records from database (prompts for confirmation)"""
     response = input("are you sure you want to delete all records? (yes/no): ")
     if response.lower() == 'yes':
-        db = DefectDatabase(db_path)
-        db.clear_all_records()
-        db.close()
+        with DefectDatabase(db_path) as db:
+            db.clear_all_records()
         print("all records deleted")
     else:
         print("operation cancelled")

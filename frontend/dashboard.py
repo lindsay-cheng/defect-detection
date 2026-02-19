@@ -18,7 +18,7 @@ class InspectionDashboard:
         
         self.fps = 0
         self.inspected = 0
-        self.fails = 0
+        self.defect_count = 0
         self.current_id = "BTL_00000"
         self.current_fill = "0.0%"
         self.current_defect = ""
@@ -193,14 +193,14 @@ class InspectionDashboard:
         self.video_label.imgtk = img
         self.video_label.configure(image=img)
                 
-    def update_stats(self, fps, inspected, fails):
+    def update_stats(self, fps, inspected, defect_count):
         """update the status bar counters"""
         self.fps = fps
         self.inspected = inspected
-        self.fails = fails
+        self.defect_count = defect_count
         self.fps_label.config(text=f"FPS: {fps:.1f}")
         self.inspected_label.config(text=f"Inspected: {inspected}")
-        self.fails_label.config(text=f"Fails: {fails}")
+        self.fails_label.config(text=f"Fails: {defect_count}")
         
     def update_current_inspection(self, bottle_id, fill, defect, status):
         """update the current inspection info panel"""
@@ -249,3 +249,7 @@ class InspectionDashboard:
     def _show_export_error(self, error_msg: str):
         """show export error message (called from main thread)"""
         messagebox.showerror("export failed", f"error: {error_msg}")
+
+    def show_error(self, message: str):
+        """display a generic error dialog (safe to call from main thread)"""
+        messagebox.showerror("error", message)

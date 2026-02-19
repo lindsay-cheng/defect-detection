@@ -4,9 +4,19 @@ Automated visual inspection system for identifying defects in plastic bottles us
 
 ## Overview
 
-This system uses YOLOv8 object detection to automatically detect and classify defective bottles in real-time. Designed for quality control in manufacturing environments.
+This system uses YOLOv8 object detection with BoT-SORT tracking to automatically detect, track, and classify defective bottles in real-time. Designed for quality control in manufacturing environments.
 
 ![Training Results](assets/defectdetectionscreenie.png)
+
+## Architecture
+
+- **Tkinter GUI** (`app.py`) -- orchestrates detection thread, frame queue, and dashboard
+- **Detection pipeline** (`backend/detector.py`) -- YOLO inference, BoT-SORT tracking, centerline counting, defect logging
+- **Thread-safe database** (`backend/database.py`) -- dedicated worker thread wrapping SQLite (WAL mode)
+- **Dashboard** (`frontend/dashboard.py`) -- live video feed, stats bar, failure log, export controls
+- **CLI script** (`scripts/detect.py`) -- headless detection in an OpenCV window for quick testing
+
+See `class_diagram.md` for full UML and threading diagrams.
 
 ## Training (image collection)
 
@@ -16,6 +26,7 @@ This system uses YOLOv8 object detection to automatically detect and classify de
 - trained on external Google Colab for GPU access
 
 ## Defect classes
+
 - `good`
 - `low_water`
 - `no_cap`
@@ -35,7 +46,6 @@ The custom YOLOv8n model achieves >99% mAP@0.5 on an 80/20 stratified train/val 
 
 **WIP:**
 - Expand dataset across multiple environments and bottle types
-- Implement more robust tracking algorithm
 - K-fold cross-validation to better assess model robustness
 - Add hard-negative examples to reduce false positives
 
@@ -61,17 +71,23 @@ CLI:
 python scripts/detect.py --model my_model/train/weights/best.pt --source 0
 ```
 
-## How to log data
+## Data logging
 
-Logging is automatic:
+Logging is automatic during detection:
 
-- sqlite database: `database/defects.db`
-- defect image crops: `detections/`
+- SQLite database: `database/defects.db`
+- Defect image crops: `detections/`
 
-Export CSV:
+Export to CSV:
 
 ```bash
 python scripts/utils.py export
+```
+
+View statistics:
+
+```bash
+python scripts/utils.py stats
 ```
 
 ## Weights

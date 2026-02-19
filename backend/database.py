@@ -2,12 +2,20 @@
 database module for storing defect detection records
 thread-safe implementation using a dedicated DB worker thread
 """
+import logging
 import os
 import sqlite3
 import threading
 from queue import Queue, Empty
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
+
+from backend.constants import DEFAULT_DB_PATH
+
+log = logging.getLogger(__name__)
+
+# max seconds to wait for a response from the DB worker before assuming a hang
+_DB_RESPONSE_TIMEOUT = 10.0
 
 
 class _DefectDatabaseCore:
@@ -22,8 +30,9 @@ class _DefectDatabaseCore:
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         
-        # use default check_same_thread=True since this runs on single thread
         self.connection = sqlite3.connect(db_path)
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA foreign_keys=ON")
         self.cursor = self.connection.cursor()
         self._create_tables()
     
@@ -33,6 +42,8 @@ class _DefectDatabaseCore:
             CREATE TABLE IF NOT EXISTS bottles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 id_bottle TEXT NOT NULL UNIQUE,
+                display_id TEXT,
+                session_id TEXT,
                 production_lot TEXT,
                 timestamp TEXT NOT NULL,
                 status TEXT NOT NULL
@@ -56,18 +67,47 @@ class _DefectDatabaseCore:
         """)
         
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_bottles_id_bottle ON bottles(id_bottle)")
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_bottles_timestamp ON bottles(timestamp)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_defect_id_bottle ON defect(id_bottle)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_defect_timestamp ON defect(timestamp)")
+
+        # migrate existing databases that predate display_id / session_id columns
+        existing = {row[1] for row in self.cursor.execute("PRAGMA table_info(bottles)")}
+        migrations_needed = []
+        if "display_id" not in existing:
+            migrations_needed.append("ALTER TABLE bottles ADD COLUMN display_id TEXT")
+        if "session_id" not in existing:
+            migrations_needed.append("ALTER TABLE bottles ADD COLUMN session_id TEXT")
+
+        if migrations_needed:
+            self.cursor.execute("SAVEPOINT schema_migration")
+            try:
+                for stmt in migrations_needed:
+                    self.cursor.execute(stmt)
+                self.cursor.execute("RELEASE SAVEPOINT schema_migration")
+            except Exception:
+                self.cursor.execute("ROLLBACK TO SAVEPOINT schema_migration")
+                raise
+
         self.connection.commit()
     
-    def insert_bottle(self, bottle_id: str, production_lot: str = None, status: str = "PASS") -> int:
+    def insert_bottle(
+        self,
+        bottle_id: str,
+        display_id: str = None,
+        session_id: str = None,
+        production_lot: str = None,
+        status: str = "PASS",
+    ) -> int:
         """insert or get existing bottle record
-        
+
         args:
-            bottle_id: unique bottle identifier (e.g. BTL_00001)
+            bottle_id: internal unique key (e.g. session_id:BTL_00001)
+            display_id: operator-facing consecutive id (e.g. BTL_00001)
+            session_id: run identifier for grouping bottles per session
             production_lot: production lot number
             status: PASS or FAIL
-        
+
         returns:
             bottle's primary key id
         """
@@ -83,8 +123,9 @@ class _DefectDatabaseCore:
         
         timestamp = datetime.now().isoformat()
         self.cursor.execute(
-            "INSERT INTO bottles (id_bottle, production_lot, timestamp, status) VALUES (?, ?, ?, ?)",
-            (bottle_id, production_lot, timestamp, status)
+            "INSERT INTO bottles (id_bottle, display_id, session_id, production_lot, timestamp, status)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (bottle_id, display_id, session_id, production_lot, timestamp, status)
         )
         self.connection.commit()
         return self.cursor.lastrowid
@@ -93,6 +134,8 @@ class _DefectDatabaseCore:
         self,
         bottle_id: str,
         defect_type: str,
+        display_id: str = None,
+        session_id: str = None,
         confidence: float = None,
         image_path: str = None,
         production_lot: str = None,
@@ -101,8 +144,10 @@ class _DefectDatabaseCore:
         """insert a defect record (also upserts the bottle as FAIL)
         
         args:
-            bottle_id: unique identifier for the bottle (e.g. BTL_00001)
+            bottle_id: internal unique key (e.g. session_id:BTL_00001)
             defect_type: type of defect
+            display_id: operator-facing consecutive id (e.g. BTL_00001)
+            session_id: run identifier
             confidence: detection confidence score (0-1)
             image_path: path to saved defect image
             production_lot: production lot number
@@ -111,7 +156,10 @@ class _DefectDatabaseCore:
         returns:
             inserted defect record id
         """
-        bottle_pk = self.insert_bottle(bottle_id, production_lot, status="FAIL")
+        bottle_pk = self.insert_bottle(
+            bottle_id, display_id=display_id, session_id=session_id,
+            production_lot=production_lot, status="FAIL"
+        )
         
         bbox_x, bbox_y, bbox_w, bbox_h = bbox if bbox else (None, None, None, None)
         timestamp = datetime.now().isoformat()
@@ -147,9 +195,9 @@ class _DefectDatabaseCore:
         """
         query = """
             SELECT 
-                defect.id, bottles.id_bottle, bottles.production_lot,
-                defect.defect_type, defect.confidence, defect.image_path,
-                defect.timestamp, defect.bbox_x, defect.bbox_y,
+                defect.id, bottles.id_bottle, bottles.display_id, bottles.session_id,
+                bottles.production_lot, defect.defect_type, defect.confidence,
+                defect.image_path, defect.timestamp, defect.bbox_x, defect.bbox_y,
                 defect.bbox_w, defect.bbox_h
             FROM defect
             JOIN bottles ON defect.id_bottle = bottles.id
@@ -178,9 +226,9 @@ class _DefectDatabaseCore:
         """get the most recent defect record for a specific bottle"""
         self.cursor.execute("""
             SELECT 
-                defect.id, bottles.id_bottle, bottles.production_lot,
-                defect.defect_type, defect.confidence, defect.image_path,
-                defect.timestamp
+                defect.id, bottles.id_bottle, bottles.display_id, bottles.session_id,
+                bottles.production_lot, defect.defect_type, defect.confidence,
+                defect.image_path, defect.timestamp
             FROM defect
             JOIN bottles ON defect.id_bottle = bottles.id
             WHERE bottles.id_bottle = ?
@@ -236,7 +284,7 @@ class DefectDatabase:
     
     _SENTINEL = object()
     
-    def __init__(self, db_path: str = "database/defects.db"):
+    def __init__(self, db_path: str = DEFAULT_DB_PATH):
         """initialize thread-safe database wrapper
         
         args:
@@ -297,27 +345,44 @@ class DefectDatabase:
         
         response_queue = Queue(maxsize=1)
         self._request_queue.put((method_name, args, kwargs, response_queue))
-        
-        ok, value = response_queue.get()
+
+        try:
+            ok, value = response_queue.get(timeout=_DB_RESPONSE_TIMEOUT)
+        except Empty:
+            raise RuntimeError(
+                f"database operation '{method_name}' timed out after {_DB_RESPONSE_TIMEOUT}s"
+            )
         if not ok:
             raise value
         return value
     
-    def insert_bottle(self, bottle_id: str, production_lot: str = None, status: str = "PASS") -> int:
+    def insert_bottle(
+        self,
+        bottle_id: str,
+        display_id: str = None,
+        session_id: str = None,
+        production_lot: str = None,
+        status: str = "PASS",
+    ) -> int:
         """insert or get existing bottle record (thread-safe)"""
-        return self._execute("insert_bottle", bottle_id, production_lot, status)
+        return self._execute("insert_bottle", bottle_id, display_id, session_id, production_lot, status)
     
     def insert_defect(
         self,
         bottle_id: str,
         defect_type: str,
+        display_id: str = None,
+        session_id: str = None,
         confidence: float = None,
         image_path: str = None,
         production_lot: str = None,
         bbox: tuple = None
     ) -> int:
         """insert a defect record (thread-safe)"""
-        return self._execute("insert_defect", bottle_id, defect_type, confidence, image_path, production_lot, bbox)
+        return self._execute(
+            "insert_defect", bottle_id, defect_type, display_id, session_id,
+            confidence, image_path, production_lot, bbox
+        )
     
     def get_defects(
         self,
@@ -357,7 +422,7 @@ class DefectDatabase:
         self.close()
 
 
-def init_database(db_path: str = "database/defects.db"):
+def init_database(db_path: str = DEFAULT_DB_PATH):
     """initialize database with proper schema (creates tables if needed)"""
     db = DefectDatabase(db_path)
     db.close()

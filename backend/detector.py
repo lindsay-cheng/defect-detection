@@ -1,40 +1,62 @@
 """
 detection pipeline for bottle defect detection
-integrates model inference, tracking, and database logging
+integrates yolo tracking (bytetrack) and database logging
 """
 import os
 import cv2
 import numpy as np
 import time
 from datetime import datetime
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, TypedDict
 from collections import deque
 
-from backend.tracker import CentroidTracker
+from backend.constants import (
+    DEFAULT_DB_PATH, DEFAULT_CONF_THRESHOLD, STATUS_PASS, STATUS_FAIL,
+    DEFECT_TYPE_GOOD, get_display_id, make_db_key,
+)
 from backend.database import DefectDatabase
 
 
+class Detection(TypedDict, total=False):
+    bbox: Tuple[int, int, int, int]
+    confidence: float
+    class_id: int
+    defect_type: str
+    track_id: int | None
+    bottle_id: str
+    display_id: str
+    on_centerline: bool
+    logged: bool
+
+
 class DefectDetector:
-    """main detection pipeline coordinating model, tracking, and logging"""
-    
+    """main detection pipeline coordinating model tracking and logging"""
+
     DEFECT_TYPES = {
         0: "good",
         1: "low_water",
         2: "no_cap",
         3: "no_label"
     }
-    
+
+    # thickness of the vertical counting line drawn on the frame
+    LINE_THICKNESS = 3
+
+    # half-width (in pixels) of the centerline detection zone.
+    # must be wide enough that a bottle's centroid cannot skip over it
+    # between consecutive frames. independent of the visual line width.
+    CENTERLINE_TOLERANCE = 15
+
     def __init__(
         self,
         model_path: Optional[str] = None,
-        conf_threshold: float = 0.5,
-        db_path: str = "database/defects.db",
+        conf_threshold: float = DEFAULT_CONF_THRESHOLD,
+        db_path: str = DEFAULT_DB_PATH,
         save_images: bool = True,
         images_dir: str = "detections",
-        min_frames_to_count: int = 2
     ):
         """initialize detector
-        
+
         args:
             model_path: path to trained model weights
             conf_threshold: confidence threshold for detections
@@ -45,194 +67,253 @@ class DefectDetector:
         self.conf_threshold = conf_threshold
         self.save_images = save_images
         self.images_dir = images_dir
-        self.min_frames_to_count = max(1, int(min_frames_to_count))
-        
-        self.tracker = CentroidTracker(max_disappeared=30, max_distance=50)
+
         self.database = DefectDatabase(db_path)
-        
+
         self.model = None
         if model_path:
             self._load_model(model_path)
-        
-        # stats tracking
+
+        # stats
         self.total_inspected = 0
         self.total_defects = 0
-        # counted_bottles: dedupe for inspected count
-        # defect_logged_bottles: dedupe for defect logging
-        self.counted_bottles = set()
-        self.defect_logged_bottles = set()
-        # track confirmation to avoid 1-frame jitter counting a "new" bottle
-        self._seen_frames_by_object_id: Dict[int, int] = {}
+        # dedupe sets keyed by track_id (int)
+        self.counted_tracks = set()
+        self.logged_tracks = set()
         self.fps_buffer = deque(maxlen=30)
         self.last_time = time.time()
-        
+
+        # operator-facing consecutive numbering; reset each session
+        self.session_id: str = ""
+        self.next_display_number: int = 1
+        self.display_number_by_track_id: Dict[int, int] = {}
+
         if self.save_images:
             os.makedirs(self.images_dir, exist_ok=True)
-    
+
     def _load_model(self, model_path: str):
-        """load trained yolo model for inference"""
+        """load trained yolo model for inference. raises on failure so callers
+        know immediately that the pipeline cannot run."""
+        if not os.path.isfile(model_path):
+            raise FileNotFoundError(f"model file not found: {model_path}")
         try:
             from ultralytics import YOLO
             self.model = YOLO(model_path)
             print(f"model loaded successfully from: {model_path}")
+        except ImportError as e:
+            raise RuntimeError(f"ultralytics package not installed: {e}") from e
         except Exception as e:
-            print(f"error loading model: {e}")
-            self.model = None
-    
-    def detect_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
-        """run detection on a single frame
-        
+            raise RuntimeError(f"failed to load model from {model_path}: {e}") from e
+
+    def detect_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, List[Detection]]:
+        """run tracking and detection on a single frame
+
         args:
             frame: input frame (BGR format from opencv)
-        
+
         returns:
             tuple of (annotated_frame, detections_list)
         """
-        # run inference (returns empty list if no model loaded)
-        detections = self._run_inference(frame) if self.model else []
-        
-        # track objects across frames to assign stable bottle IDs
-        bboxes = [(d['bbox'][0], d['bbox'][1], d['bbox'][2], d['bbox'][3]) 
-                  for d in detections]
-        self.tracker.update(bboxes)
-        
+        if frame is None or frame.size == 0:
+            raise ValueError("frame cannot be None or empty")
+        if frame.ndim != 3:
+            raise ValueError(f"expected 3-channel frame (H, W, C), got ndim={frame.ndim}")
+
+        detections = self._run_tracking(frame) if self.model else []
+
+        frame_width = frame.shape[1]
+        mid_x = frame_width // 2
         for detection in detections:
-            bbox = detection['bbox']
-            cx = int(bbox[0] + bbox[2] / 2)
-            cy = int(bbox[1] + bbox[3] / 2)
-            object_id = self.tracker.get_object_id_by_centroid((cx, cy))
-            
-            if object_id is not None:
-                detection['object_id'] = object_id
-                detection['bottle_id'] = self.tracker.format_bottle_id(object_id)
-            else:
-                detection['object_id'] = None
-                detection['bottle_id'] = "UNKNOWN"
-        
-        # count unique bottles and log defects
+            cx = detection['bbox'][0] + detection['bbox'][2] // 2
+            detection['on_centerline'] = abs(cx - mid_x) <= self.CENTERLINE_TOLERANCE
+
+        self._assign_display_ids(detections)
         self._count_inspected(detections)
         self._log_detections(frame, detections)
-        
-        annotated_frame = self._annotate_frame(frame.copy(), detections)
-        
-        # update fps
+
+        # annotate in-place; _log_detections already saved crops from the raw frame
+        annotated_frame = self._annotate_frame(frame, detections)
+
         current_time = time.time()
         self.fps_buffer.append(1.0 / (current_time - self.last_time))
         self.last_time = current_time
-        
+
         return annotated_frame, detections
-    
-    def _run_inference(self, frame: np.ndarray) -> List[Dict[str, Any]]:
-        """run yolo model inference on a single frame
-        
+
+    def _run_tracking(self, frame: np.ndarray) -> List[Detection]:
+        """run yolo bytetrack on a single frame
+
         returns:
-            list of detection dicts with bbox, confidence, class, defect_type
+            list of detection dicts with bbox, confidence, class_id, defect_type,
+            track_id, and bottle_id
         """
+        results = self.model.track(
+            frame,
+            persist=True,
+            tracker="backend/trackers/botsort.yaml",
+            conf=self.conf_threshold,
+            verbose=False
+        )
+
         detections = []
-        results = self.model(frame, conf=self.conf_threshold, verbose=False)
-        
-        for result in results:
-            for box in result.boxes:
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                cls = int(box.cls[0])
-                
-                detections.append({
-                    'bbox': (int(x1), int(y1), int(x2 - x1), int(y2 - y1)),
-                    'confidence': float(box.conf[0]),
-                    'class': cls,
-                    'defect_type': self.DEFECT_TYPES.get(cls, 'unknown')
-                })
-        
+        result = results[0]
+
+        if result.boxes is None or len(result.boxes) == 0:
+            return detections
+
+        # boxes.id is a tensor when tracks are active, None otherwise
+        track_ids = result.boxes.id
+
+        for i, box in enumerate(result.boxes):
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            class_id = int(box.cls[0])
+
+            if track_ids is not None:
+                track_id = int(track_ids[i].cpu())
+                bottle_id = f"BTL_{track_id:05d}"
+            else:
+                track_id = None
+                bottle_id = "UNKNOWN"
+
+            detections.append({
+                'bbox': (int(x1), int(y1), int(x2 - x1), int(y2 - y1)),
+                'confidence': float(box.conf[0]),
+                'class_id': class_id,
+                'defect_type': self.DEFECT_TYPES.get(class_id, 'unknown'),
+                'track_id': track_id,
+                'bottle_id': bottle_id,
+            })
+
         return detections
-    
-    def _count_inspected(self, detections: List[Dict[str, Any]]):
-        """count unique bottles seen (good or defective)"""
-        # note: we count by stable tracker id after it has been seen for a few frames
-        seen_object_ids_this_frame = set()
-        for detection in detections:
-            bottle_id = detection.get('bottle_id')
-            object_id = detection.get('object_id')
-            if bottle_id and bottle_id != "UNKNOWN" and object_id is not None:
-                seen_object_ids_this_frame.add(object_id)
-                self._seen_frames_by_object_id[object_id] = self._seen_frames_by_object_id.get(object_id, 0) + 1
 
-                if bottle_id not in self.counted_bottles and self._seen_frames_by_object_id[object_id] >= self.min_frames_to_count:
-                    self.counted_bottles.add(bottle_id)
-                    self.total_inspected += 1
-
-        # reset streaks for objects not observed this frame (keeps confirmation local in time)
-        for oid in list(self._seen_frames_by_object_id.keys()):
-            if oid not in seen_object_ids_this_frame:
-                self._seen_frames_by_object_id[oid] = 0
-    
-    def _log_detections(self, frame: np.ndarray, detections: List[Dict[str, Any]]):
-        """log defective bottles to database (skips good bottles, dedupes by id)"""
+    def _assign_display_ids(self, detections: List[Detection]):
+        """assign a consecutive operator-facing display_id on the first centerline hit per track"""
         for detection in detections:
-            bottle_id = detection.get('bottle_id')
+            track_id = detection.get('track_id')
+            if track_id is None:
+                continue
+            if track_id in self.display_number_by_track_id:
+                n = self.display_number_by_track_id[track_id]
+            elif detection.get('on_centerline'):
+                n = self.next_display_number
+                self.display_number_by_track_id[track_id] = n
+                self.next_display_number += 1
+            else:
+                continue
+            detection['display_id'] = f"BTL_{n:05d}"
+
+    def _count_inspected(self, detections: List[Detection]):
+        """count unique bottles on the vertical center line and record them in the DB as PASS.
+        defective bottles are later upserted to FAIL by _log_detections.
+        uses the on_centerline flag computed once in detect_frame().
+        """
+        for detection in detections:
+            if not detection.get('on_centerline'):
+                continue
+            track_id = detection.get('track_id')
+            if track_id is None or track_id in self.counted_tracks:
+                continue
+            self.counted_tracks.add(track_id)
+            self.total_inspected += 1
+            display_id = detection.get('display_id')
+            if display_id:
+                self.database.insert_bottle(
+                    bottle_id=make_db_key(self.session_id, display_id),
+                    display_id=display_id,
+                    session_id=self.session_id,
+                    status=STATUS_PASS,
+                )
+
+    def _log_detections(self, frame: np.ndarray, detections: List[Detection]):
+        """log defective bottles to database when centroid is on the center line.
+        uses the on_centerline flag computed once in detect_frame()."""
+        for detection in detections:
+            if not detection.get('on_centerline'):
+                continue
+            track_id = detection.get('track_id')
             defect_type = detection.get('defect_type')
-            
-            if not bottle_id or bottle_id == "UNKNOWN" or defect_type == "good":
+
+            if track_id is None or defect_type == DEFECT_TYPE_GOOD:
                 continue
-            if bottle_id in self.defect_logged_bottles:
+            if track_id in self.logged_tracks:
                 continue
-            
-            self.defect_logged_bottles.add(bottle_id)
+
+            display_id = detection.get('display_id')
+
+            self.logged_tracks.add(track_id)
             self.total_defects += 1
-            
+            detection['logged'] = True
+
             image_path = None
             if self.save_images:
-                image_path = self._save_defect_image(frame, detection, bottle_id)
-            
+                image_path = self._save_defect_image(frame, detection, display_id or track_id)
+
             self.database.insert_defect(
-                bottle_id=bottle_id,
+                bottle_id=make_db_key(self.session_id, display_id, track_id),
+                display_id=display_id,
+                session_id=self.session_id,
                 defect_type=defect_type,
                 confidence=detection.get('confidence'),
                 image_path=image_path,
                 bbox=detection['bbox']
             )
-    
-    def _save_defect_image(self, frame: np.ndarray, detection: Dict[str, Any], bottle_id: str) -> str:
-        """crop and save image of a defective bottle, returns the saved file path"""
+
+    def _save_defect_image(
+        self, frame: np.ndarray, detection: Detection, bottle_id: str | int
+    ) -> Optional[str]:
+        """crop and save image of a defective bottle. returns filepath on
+        success, None if the write fails so the caller never stores a bad path."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filepath = os.path.join(self.images_dir, f"{bottle_id}_{timestamp}.jpg")
-        
+
         x, y, w, h = detection['bbox']
         padding = 20
         x1 = max(0, x - padding)
         y1 = max(0, y - padding)
         x2 = min(frame.shape[1], x + w + padding)
         y2 = min(frame.shape[0], y + h + padding)
-        
-        cv2.imwrite(filepath, frame[y1:y2, x1:x2])
+
+        try:
+            ok = cv2.imwrite(filepath, frame[y1:y2, x1:x2])
+            if not ok:
+                print(f"warning: cv2.imwrite returned False for {filepath}")
+                return None
+        except Exception as e:
+            print(f"warning: failed to save defect image {filepath}: {e}")
+            return None
         return filepath
-    
-    def _annotate_frame(self, frame: np.ndarray, detections: List[Dict[str, Any]]) -> np.ndarray:
-        """draw bounding boxes and labels on frame"""
+
+    def _annotate_frame(self, frame: np.ndarray, detections: List[Detection]) -> np.ndarray:
+        """draw bounding boxes, labels, and center counting line on frame"""
+        mid_x = frame.shape[1] // 2
+        cv2.line(frame, (mid_x, 0), (mid_x, frame.shape[0]),
+                 (255, 255, 0), self.LINE_THICKNESS)
+
         for detection in detections:
             x, y, w, h = detection['bbox']
             defect_type = detection.get('defect_type', 'unknown')
             confidence = detection.get('confidence', 0.0)
-            bottle_id = detection.get('bottle_id', 'N/A')
-            
-            color = (0, 255, 0) if defect_type == "good" else (0, 0, 255)
+            label_id = get_display_id(detection)
+
+            color = (0, 255, 0) if defect_type == DEFECT_TYPE_GOOD else (0, 0, 255)
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-            
-            label = f"{bottle_id}: {defect_type}"
+
+            label = f"{label_id}: {defect_type}"
             if confidence > 0:
                 label += f" ({confidence:.2f})"
-            
+
             (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(frame, (x, y - text_h - 10), (x + text_w, y), color, -1)
             cv2.putText(frame, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
+
         return frame
-    
+
     def get_fps(self) -> float:
         """get current average fps"""
         if not self.fps_buffer:
             return 0.0
         return sum(self.fps_buffer) / len(self.fps_buffer)
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """get current detection statistics"""
         return {
@@ -244,16 +325,33 @@ class DefectDetector:
                 if self.total_inspected > 0 else 0.0
             )
         }
-    
-    def reset_stats(self):
-        """reset detection statistics"""
+
+    def reset_tracking_state(self):
+        """reset bytetrack internal state so track IDs restart.
+        also clears all track-id-keyed state (dedupe sets, display mapping)
+        since those are meaningless once the tracker reassigns IDs from 1.
+        session_id and next_display_number are preserved so display numbering
+        continues uninterrupted across video loops within the same session.
+        """
+        if self.model is not None:
+            predictor = getattr(self.model, 'predictor', None)
+            if predictor is not None:
+                trackers = getattr(predictor, 'trackers', None)
+                if trackers:
+                    for tracker in trackers:
+                        tracker.reset()
+        self.counted_tracks.clear()
+        self.logged_tracks.clear()
+        self.display_number_by_track_id.clear()
+
+    def start_session(self):
+        """begin a new inspection run — resets stats, tracker state, and display numbering"""
+        self.reset_tracking_state()  # also clears track-keyed state
         self.total_inspected = 0
         self.total_defects = 0
-        self.counted_bottles.clear()
-        self.defect_logged_bottles.clear()
-        self._seen_frames_by_object_id.clear()
-        self.tracker.reset()
-    
+        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.next_display_number = 1
+
     def cleanup(self):
         """cleanup resources"""
         self.database.close()
