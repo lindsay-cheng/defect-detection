@@ -7,6 +7,9 @@ import threading
 from queue import Queue
 
 from frontend.dashboard import InspectionDashboard
+from backend.constants import (
+    STATUS_PASS, STATUS_FAIL, DEFECT_TYPE_GOOD, get_display_id,
+)
 from backend.detector import DefectDetector
 
 class DefectDetectionApp:
@@ -29,6 +32,7 @@ class DefectDetectionApp:
         self.detection_thread = None
         self.detection_running = False
         self.frame_queue = Queue(maxsize=2)
+        self._frame_count = 0
         
         self._setup_callbacks()
         self._poll_frames()
@@ -36,21 +40,40 @@ class DefectDetectionApp:
     def _setup_callbacks(self):
         """connect dashboard buttons to backend functionality"""
         self.dashboard.bind_button(
-            self.dashboard.start_button, self.dashboard.start_label, self.start_detection)
+            self.dashboard.start_button,
+            self.dashboard.start_label,
+            self.start_detection,
+        )
         self.dashboard.bind_button(
-            self.dashboard.stop_button, self.dashboard.stop_label, self.stop_detection)
+            self.dashboard.stop_button,
+            self.dashboard.stop_label,
+            self.stop_detection,
+        )
         self.dashboard.bind_button(
-            self.dashboard.stats_button, self.dashboard.stats_label,
-            lambda: self.dashboard.show_stats(self.detector.database))
+            self.dashboard.stats_button,
+            self.dashboard.stats_label,
+            self._show_stats,
+        )
         self.dashboard.bind_button(
-            self.dashboard.export_button, self.dashboard.export_label,
-            lambda: self.dashboard.export_data(self._export_callback))
+            self.dashboard.export_button,
+            self.dashboard.export_label,
+            self._export_data,
+        )
+
+    def _show_stats(self):
+        self.dashboard.show_stats(self.detector.database)
+
+    def _export_data(self):
+        self.dashboard.export_data(self._export_callback)
     
     def start_detection(self):
         """start the detection thread"""
         if self.detection_running:
             return
-        
+
+        # start a new session: resets tracker, stats, and display numbering
+        self.detector.start_session()
+
         self.detection_running = True
         self.detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
         self.detection_thread.start()
@@ -76,65 +99,88 @@ class DefectDetectionApp:
     def _detection_loop(self):
         """main detection loop running in a background thread"""
         cap = cv2.VideoCapture(self.video_path)
-        
+
         if not cap.isOpened():
-            print(f"error: could not open video file: {self.video_path}")
+            msg = f"could not open video file: {self.video_path}"
+            print(f"error: {msg}")
+            self.root.after(0, self.dashboard.show_error, msg)
             self.detection_running = False
             return
-        
+
         try:
             while self.detection_running:
                 ret, frame = cap.read()
-                
-                # loop video when it reaches the end
+
                 if not ret:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    self.detector.reset_tracking_state()
                     ret, frame = cap.read()
                     if not ret:
-                        print("error reading frame from video")
+                        msg = "cannot read frames from video"
+                        print(f"error: {msg}")
+                        self.root.after(0, self.dashboard.show_error, msg)
                         break
-                
+
                 annotated_frame, detections = self.detector.detect_frame(frame)
-                
-                if not self.frame_queue.full():
-                    self.frame_queue.put(annotated_frame)
-                
-                stats = self.detector.get_stats()
+
+                # drop stale frame to keep the display current (backpressure)
+                if self.frame_queue.full():
+                    try:
+                        self.frame_queue.get_nowait()
+                    except Exception:
+                        pass
+                self.frame_queue.put_nowait(annotated_frame)
+
+                self._frame_count += 1
+                # throttle the status-bar refresh to every 3rd frame
+                stats = self.detector.get_stats() if self._frame_count % 3 == 0 else None
                 self._push_stats_to_dashboard(stats, detections)
-        
+
         finally:
             cap.release()
             self.detection_running = False
     
     def _push_stats_to_dashboard(self, stats, detections):
-        """schedule ui updates from the detection thread (thread-safe via root.after)"""
-        self.root.after(0, lambda: self.dashboard.update_stats(
-            fps=stats['fps'],
-            inspected=stats['total_inspected'],
-            fails=stats['total_defects']
-        ))
-        
+        """schedule ui updates from the detection thread (thread-safe via root.after).
+        stats may be None on throttled frames."""
+        if stats is not None:
+            self.root.after(
+                0,
+                self.dashboard.update_stats,
+                stats['fps'],
+                stats['total_inspected'],
+                stats['total_defects'],
+            )
+        self._push_current_inspection(detections)
+        self._push_logged_failures(detections)
+
+    def _push_current_inspection(self, detections):
+        """update the 'current inspection' panel with the latest centerline bottle"""
         if not detections:
             return
-        
-        latest = detections[0]
-        bottle_id = latest.get('bottle_id', 'N/A')
+        centerline = [d for d in detections if d.get('on_centerline')]
+        if not centerline:
+            return
+        latest = centerline[0]
+        display_id = get_display_id(latest)
         defect_type = latest.get('defect_type', 'unknown')
-        confidence = latest.get('confidence', 0.0)
-        status = "FAIL" if defect_type != "good" else "PASS"
-        
-        self.root.after(0, lambda: self.dashboard.update_current_inspection(
-            bottle_id=bottle_id,
-            fill="N/A",
-            defect=defect_type,
-            status=status
-        ))
-        
-        if status == "FAIL":
-            self.root.after(0, lambda: self.dashboard.add_failure(
-                bottle_id=bottle_id,
-                defect_desc=f"{defect_type} ({confidence:.2f})"
-            ))
+        status = STATUS_FAIL if defect_type != DEFECT_TYPE_GOOD else STATUS_PASS
+        self.root.after(
+            0,
+            self.dashboard.update_current_inspection,
+            display_id,
+            "N/A",
+            defect_type,
+            status,
+        )
+
+    def _push_logged_failures(self, detections):
+        """append newly-logged defect entries to the failures panel"""
+        for det in detections:
+            if det.get('logged'):
+                bid = get_display_id(det)
+                desc = f"{det['defect_type']} ({det['confidence']:.2f})"
+                self.root.after(0, self.dashboard.add_failure, bid, desc)
     
     def _poll_frames(self):
         """periodically pull annotated frames from the queue and display them"""
@@ -149,10 +195,10 @@ class DefectDetectionApp:
             try:
                 export_to_csv(output_path="defect_report.csv")
                 # schedule UI update on main thread
-                self.root.after(0, lambda: self.dashboard._show_export_success())
+                self.root.after(0, self.dashboard._show_export_success)
             except Exception as e:
                 # schedule UI update on main thread
-                self.root.after(0, lambda: self.dashboard._show_export_error(str(e)))
+                self.root.after(0, self.dashboard._show_export_error, str(e))
         
         # run export in background thread to avoid blocking UI
         export_thread = threading.Thread(target=export_task, daemon=True)
@@ -174,5 +220,5 @@ if __name__ == "__main__":
     from backend.database import init_database
     
     init_database()
-    app = DefectDetectionApp(video_path="assets/video2.mov")
+    app = DefectDetectionApp(video_path="assets/video5.mov")
     app.run()

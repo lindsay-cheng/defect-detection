@@ -80,3 +80,7 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Documentation
+docs/
+class_diagram.md

@@ -8,13 +8,14 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from backend.constants import DEFAULT_CONF_THRESHOLD
 from backend.detector import DefectDetector
 
 
 def detect_live(
     model_path: str = None,
     source: int = 0,
-    conf_threshold: float = 0.5,
+    conf_threshold: float = DEFAULT_CONF_THRESHOLD,
     save_detections: bool = True
 ):
     """run real-time detection on a video source
@@ -64,8 +65,8 @@ def detect_live(
             if key == ord('q'):
                 break
             elif key == ord('r'):
-                detector.reset_stats()
-                print("stats reset")
+                detector.start_session()
+                print("session reset")
     
     except KeyboardInterrupt:
         print("\ndetection stopped by user")
@@ -90,7 +91,7 @@ if __name__ == "__main__":
                        help="path to trained model (optional for testing)")
     parser.add_argument("--source", type=str, default="0",
                        help="video source (0 for webcam, or video file path)")
-    parser.add_argument("--conf", type=float, default=0.5,
+    parser.add_argument("--conf", type=float, default=DEFAULT_CONF_THRESHOLD,
                        help="confidence threshold")
     parser.add_argument("--no-save", action="store_true",
                        help="don't save defect images")

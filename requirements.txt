@@ -14,5 +14,8 @@ ultralytics>=8.0.220  # yolo framework
 # tkinter is built into python
 
 # utilities
-scipy>=1.13.0  # for centroid tracking calculations
-pyyaml>=6.0.1  # for dataset config parsing
+pyyaml>=6.0.1   # for dataset config parsing
+lap>=0.5.12     # linear assignment for botsort/bytetrack
+
+# testing
+pytest>=8.0.0
