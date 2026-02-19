@@ -17,6 +17,8 @@ runs/
 # Database
 *.db
 *.sqlite
+*.db-wal
+*.db-shm
 
 # Processed outputs
 detections/
