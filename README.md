@@ -6,7 +6,7 @@ Automated visual inspection system for identifying defects in Kirkland plastic b
 
 This system uses YOLOv8 object detection and Bytetrack object tracking to automatically detect and classify defective bottles in real-time. Designed for quality control in manufacturing line environments.
 
-![Training Results](assets/defectdetectionscreenie.png)
+![](assets/demo.mp4)
 
 ## Training (image collection)
 
