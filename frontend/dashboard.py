@@ -12,7 +12,7 @@ class InspectionDashboard:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Industrial Inspection System")
+        self.root.title("defect-detection")
         self.root.geometry("1280x720")
         self.root.configure(bg="#e0e0e0")
         
@@ -20,7 +20,6 @@ class InspectionDashboard:
         self.inspected = 0
         self.defect_count = 0
         self.current_id = "BTL_00000"
-        self.current_fill = "0.0%"
         self.current_defect = ""
         self.current_status = ""
         
@@ -98,7 +97,7 @@ class InspectionDashboard:
         self._setup_controls_panel(right_frame)
     
     def _setup_inspection_panel(self, parent):
-        """current inspection details (id, fill, defect, status)"""
+        """current inspection details (id, defect, status)"""
         inspection_frame = tk.LabelFrame(parent, text="Current Inspection", 
                                         bg="#f5f5f5", fg="black", font=("Arial", 10), relief=tk.GROOVE, bd=2)
         inspection_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -108,17 +107,15 @@ class InspectionDashboard:
         
         labels = [
             ("ID:", self.current_id, "black", "bold"),
-            ("Fill:", self.current_fill, "#4CAF50", "bold"),
             ("Defect:", self.current_defect, "black", None),
             ("Status:", self.current_status, "#f44336", "bold"),
         ]
         
         self.id_label = None
-        self.fill_label = None
         self.defect_label = None
         self.status_label = None
         
-        label_attrs = ['id_label', 'fill_label', 'defect_label', 'status_label']
+        label_attrs = ['id_label', 'defect_label', 'status_label']
         
         for row, (title, value, fg_color, weight) in enumerate(labels):
             font = ("Arial", 10, weight) if weight else ("Arial", 10)
@@ -202,10 +199,9 @@ class InspectionDashboard:
         self.inspected_label.config(text=f"Inspected: {inspected}")
         self.fails_label.config(text=f"Fails: {defect_count}")
         
-    def update_current_inspection(self, bottle_id, fill, defect, status):
+    def update_current_inspection(self, bottle_id, defect, status):
         """update the current inspection info panel"""
         self.id_label.config(text=bottle_id)
-        self.fill_label.config(text=fill)
         self.defect_label.config(text=defect)
         self.status_label.config(text=status)
         self.status_label.config(fg="#f44336" if status == "FAIL" else "#4CAF50")

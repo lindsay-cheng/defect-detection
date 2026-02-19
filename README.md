@@ -1,32 +1,21 @@
 # Real-Time Bottle Defect Detection System
 
-Automated visual inspection system for identifying defects in plastic bottles using YOLO-based computer vision.
+Automated visual inspection system for identifying defects in Kirkland plastic bottles using YOLO-based computer vision.
 
 ## Overview
 
-This system uses YOLOv8 object detection with BoT-SORT tracking to automatically detect, track, and classify defective bottles in real-time. Designed for quality control in manufacturing environments.
+This system uses YOLOv8 object detection and Bytetrack object tracking to automatically detect and classify defective bottles in real-time. Designed for quality control in manufacturing line environments.
 
 ![Training Results](assets/defectdetectionscreenie.png)
 
-## Architecture
-
-- **Tkinter GUI** (`app.py`) -- orchestrates detection thread, frame queue, and dashboard
-- **Detection pipeline** (`backend/detector.py`) -- YOLO inference, BoT-SORT tracking, centerline counting, defect logging
-- **Thread-safe database** (`backend/database.py`) -- dedicated worker thread wrapping SQLite (WAL mode)
-- **Dashboard** (`frontend/dashboard.py`) -- live video feed, stats bar, failure log, export controls
-- **CLI script** (`scripts/detect.py`) -- headless detection in an OpenCV window for quick testing
-
-See `class_diagram.md` for full UML and threading diagrams.
-
 ## Training (image collection)
 
-- images were collected by me and annotated in YOLO format
+- images were collected by me and annotated in YOLO format using Roboflow
 - dataset config: `dataset/data.yaml`
 - classes are defined by the trained model and `dataset/data.yaml`
 - trained on external Google Colab for GPU access
 
 ## Defect classes
-
 - `good`
 - `low_water`
 - `no_cap`
@@ -47,7 +36,6 @@ The custom YOLOv8n model achieves >99% mAP@0.5 on an 80/20 stratified train/val 
 **WIP:**
 - Expand dataset across multiple environments and bottle types
 - K-fold cross-validation to better assess model robustness
-- Add hard-negative examples to reduce false positives
 
 ## Setup
 
@@ -71,23 +59,17 @@ CLI:
 python scripts/detect.py --model my_model/train/weights/best.pt --source 0
 ```
 
-## Data logging
+## How to log data
 
-Logging is automatic during detection:
+Logging is automatic:
 
-- SQLite database: `database/defects.db`
-- Defect image crops: `detections/`
+- sqlite database: `database/defects.db`
+- defect image crops: `detections/`
 
-Export to CSV:
+Export CSV:
 
 ```bash
 python scripts/utils.py export
-```
-
-View statistics:
-
-```bash
-python scripts/utils.py stats
 ```
 
 ## Weights
