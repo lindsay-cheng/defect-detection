@@ -18,6 +18,7 @@ This system uses YOLOv8 object detection and Bytetrack object tracking to automa
 - trained on external Google Colab for GPU access
 
 ## Defect classes
+
 - `good`
 - `low_water`
 - `no_cap`
