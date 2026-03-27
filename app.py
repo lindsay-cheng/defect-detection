@@ -24,7 +24,7 @@ class DefectDetectionApp:
         self.root = tk.Tk()
         self.dashboard = InspectionDashboard(self.root)
         self.detector = DefectDetector(
-            model_path="my_model/train/weights/best.pt",
+            model_path="model/weights/best.pt",
             conf_threshold=0.5,
             save_images=True
         )
