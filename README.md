@@ -26,10 +26,18 @@ This system uses YOLOv8 object detection and Bytetrack object tracking to automa
 
 ## Preliminary Results (Controlled Environment)
 
-The custom YOLOv8n model achieves >99% mAP@0.5 on an 80/20 stratified train/val split. Dataset consists of ~300 images captured with varied camera angles, zoom levels, lighting, and positions. While these metrics demonstrate the model's capability to learn defect patterns, the small dataset size and single-environment capture may limit generalization.
+The custom YOLO11s model achieves 97.7% mAP@0.5 (93.1% mAP@0.5-0.95) on an 80/20 stratified train/val split. Dataset consists of ~300 images captured with varied camera angles, zoom levels, lighting, and positions. While these metrics demonstrate the model's capability to learn defect patterns, the small dataset size and single-environment capture may limit generalization.
 
-![Training Results](my_model/train/results.png)
-*Training metrics over 100 epochs showing convergence*
+| Class | Precision | Recall | mAP@0.5 | mAP@0.5-0.95 |
+|-------|-----------|--------|---------|--------------|
+| all | 0.977 | 0.969 | 0.977 | 0.931 |
+| good | 0.997 | 0.952 | 0.993 | 0.943 |
+| low_water | 0.995 | 0.923 | 0.956 | 0.891 |
+| no_cap | 0.996 | 1.000 | 0.995 | 0.967 |
+| no_label | 0.918 | 1.000 | 0.963 | 0.925 |
+
+![Training Results](model/results.png)
+*Training metrics over 150 epochs*
 
 **Important Limitations:**
 - Small dataset size increases risk of overfitting
@@ -59,7 +67,7 @@ python app.py
 CLI:
 
 ```bash
-python scripts/detect.py --model my_model/train/weights/best.pt --source 0
+python scripts/detect.py --model model/weights/best.pt --source 0
 ```
 
 ## How to log data
@@ -77,5 +85,4 @@ python scripts/utils.py export
 
 ## Weights
 
-- trained weights: `my_model/train/weights/best.pt` (and `last.pt`)
-- additional weights: `my_model/my_model.pt`
+- trained weights: `model/weights/best.pt` (and `last.pt`)

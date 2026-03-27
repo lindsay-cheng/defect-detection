@@ -9,10 +9,11 @@ data/raw/
 # Model weights
 *.pt
 !yolov8n.pt 
-!my_model/*.pt
-!my_model/**/*.pt
+!model/weights/*.pt
 models/*.pt
 runs/
+*train_batch*.jpg
+*val_batch*.jpg
 
 # Database
 *.db
