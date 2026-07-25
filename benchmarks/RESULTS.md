@@ -85,6 +85,15 @@ Source: `benchmarks/results/sweep_summary.md` (which consolidates `latency_basel
 | **coreml-int8 @640** | 9.25 | 0.9950 | 0.9529 | 16.10 | 19.69 | 62.8 | `quantize='w8a16'` kmeans weight-palettized (weight-only) |
 | onnx-fp32 @640 | 36.21 | 0.9950 | 0.9551 | 94.08 | 126.44 | 10.6 | ORT-CPU slower than .pt CPU baseline |
 
+End-to-end pipeline mode (`FrameReader.read` + `DetectionPipeline.detect_frame` wall clock — decode, track, centerline logic, DB write, annotate), 3-run aggregate over 300 frames. Source: `benchmarks/results/{latency_baseline,latency_sweep}.md`.
+
+| config | e2e FPS (3-run agg) | vs baseline |
+|---|---:|---:|
+| pytorch .pt @640 (CPU) | 10.6 | baseline |
+| coreml-fp16 @640 | **40.3** | 3.8× |
+| coreml-int8 @640 | 38.2 | 3.6× |
+
+- The e2e figure is the number an operator experiences; the engine p50 above is the model call in isolation. A single confirmation run of coreml-fp16 pipeline mode reached 42.3 FPS — quote the 3-run aggregate (40.3), not that run, since the baseline is also a 3-run aggregate.
 - All four @640 configs land within ±0.7 pt of each other on mAP50-95 (0.9502–0.9567) — accuracy is **not** the differentiator at n=56; latency and artifact size are.
 - Fixed-shape exports (CoreML/ONNX with `nms=True`) reject non-640 input sizes; only the `.pt` is dynamic — that is why the {512, 384} val rows are populated for pytorch only.
 - Self-consistency: per artifact p50 ≤ p95 ≤ p99 across all 3 runs; fps ≈ 1000/p50 (2 sig figs).
