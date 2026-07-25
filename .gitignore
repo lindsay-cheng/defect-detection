@@ -4,7 +4,11 @@ context.txt
 # Dataset (don't commit large image datasets)
 dataset/data/
 dataset/raw/
+dataset/split/
 data/raw/
+
+# Benchmarks — exported artifacts (results/ stays tracked)
+benchmarks/models/
 
 # Model weights
 *.pt
@@ -87,3 +91,9 @@ temp/
 # Documentation
 docs/
 class_diagram.md
+
+# Skills
+.cursor/
+
+# Vault
+defect-detection-vault/

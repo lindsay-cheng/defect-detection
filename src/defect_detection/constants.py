@@ -1,5 +1,5 @@
 """
-shared constants for the defect-detection backend
+shared constants for the defect_detection package
 """
 
 DEFAULT_DB_PATH = "database/defects.db"
@@ -9,6 +9,8 @@ STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
 
 DEFECT_TYPE_GOOD = "good"
+
+DEFECT_TYPES = {0: "good", 1: "low_water", 2: "no_cap", 3: "no_label"}
 
 
 def get_display_id(detection: dict, default: str = "N/A") -> str:

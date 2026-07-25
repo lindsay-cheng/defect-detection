@@ -1,9 +1,8 @@
-"""tests for backend.database — worker thread, timeout, CRUD, and shutdown"""
-import os
-import tempfile
+"""tests for defect_detection.storage.database — worker thread, timeout, CRUD, and shutdown"""
+
 import pytest
 
-from backend.database import DefectDatabase, _DefectDatabaseCore
+from defect_detection.storage.database import DefectDatabase, _DefectDatabaseCore
 
 
 @pytest.fixture()
@@ -58,7 +57,7 @@ class TestDefectDatabaseCRUD:
         tmp_db.insert_bottle("sess:BTL_00001", status="FAIL")
         # re-inserting as PASS should not overwrite
         tmp_db.insert_bottle("sess:BTL_00001", status="PASS")
-        defect = tmp_db.get_defect_by_bottle_id("sess:BTL_00001")
+        tmp_db.get_defect_by_bottle_id("sess:BTL_00001")
         # no defect record, but bottle is still FAIL (verified indirectly)
         pk = tmp_db.insert_bottle("sess:BTL_00001", status="PASS")
         assert isinstance(pk, int)
@@ -93,15 +92,15 @@ class TestDefectDatabaseCoreMigration:
 
     def test_tables_exist(self, core_db):
         tables = {
-            row[0] for row in
-            core_db.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            row[0]
+            for row in core_db.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
         assert "bottles" in tables
         assert "defect" in tables
 
     def test_bottles_timestamp_index_exists(self, core_db):
         indexes = {
-            row[0] for row in
-            core_db.cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
+            row[0]
+            for row in core_db.cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
         }
         assert "idx_bottles_timestamp" in indexes
