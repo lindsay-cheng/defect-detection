@@ -1,5 +1,6 @@
-"""tests for backend.constants helpers"""
-from backend.constants import get_display_id, make_db_key
+"""tests for defect_detection.constants helpers"""
+
+from defect_detection.constants import get_display_id, make_db_key
 
 
 class TestGetDisplayId:
