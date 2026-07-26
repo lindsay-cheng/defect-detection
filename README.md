@@ -83,29 +83,29 @@ Both fixes were measured before and after on a fixed input (`assets/video5.mov`,
 | Crossings logged correctly vs ground truth | 5/5 | 5/5 |
 | mAP50-95 on the local val split | 0.9502 | 0.9567 (within noise) |
 
-### 1. Runtime — CoreML export
+### 1. Runtime: CoreML export
 
 The model was exported to CoreML (fp16 and 8-bit weight-palettized) and ONNX, then benchmarked against the PyTorch baseline on CPU and MPS. 30 warmup frames, 300 measured frames, 3 runs per configuration, quantiles over per-call latency.
 
 | config | size MB | mAP50 | mAP50-95 | engine p50 ms | engine p95 ms | FPS |
 |---|---:|---:|---:|---:|---:|---:|
-| pytorch `.pt` @640 (CPU) — baseline | 18.29 | 0.9950 | 0.9502 | 70.60 | 98.40 | 14.2 |
+| pytorch `.pt` @640 (CPU), baseline | 18.29 | 0.9950 | 0.9502 | 70.60 | 98.40 | 14.2 |
 | pytorch `.pt` @640 (MPS) | 18.29 | 0.9950 | 0.9502 | 31.82 | 45.43 | 31.2 |
-| **coreml-fp16 @640** — recommended | 18.17 | 0.9950 | 0.9567 | 16.15 | 20.86 | **62.4** |
+| **coreml-fp16 @640**, recommended | 18.17 | 0.9950 | 0.9567 | 16.15 | 20.86 | **62.4** |
 | coreml-int8 @640 (`w8a16`) | 9.25 | 0.9950 | 0.9529 | 16.10 | 19.69 | 62.8 |
 | onnx-fp32 @640 | 36.21 | 0.9950 | 0.9551 | 94.08 | 126.44 | 10.6 |
 
-The table above is the model call in isolation. End-to-end through the real pipeline — video decode, tracking, centerline logic, database writes, annotation — CoreML fp16 runs at **40.3 FPS against a 10.6 FPS PyTorch-CPU baseline**, both 3-run aggregates over 300 frames.
+The table above is the model call in isolation. End-to-end through the real pipeline (video decode, tracking, centerline logic, database writes, annotation), CoreML fp16 runs at **40.3 FPS against a 10.6 FPS PyTorch-CPU baseline**, both 3-run aggregates over 300 frames.
 
-**CoreML fp16 @640 is the recommended operating point**: 4.4× the CPU baseline, 2.0× MPS, no measurable accuracy change, 18 MB. The int8 artifact ties it on latency at half the size, which is the better pick when bundle size matters. Accuracy is *not* the differentiator here — all four @640 configurations land within 0.7 points of each other on mAP50-95, which is inside the noise floor of a 56-image validation set.
+**CoreML fp16 @640 is the recommended operating point**: 4.4× the CPU baseline, 2.0× MPS, no measurable accuracy change, 18 MB. The int8 artifact ties it on latency at half the size, which is the better pick when bundle size matters. Accuracy is *not* the differentiator here: all four @640 configurations land within 0.7 points of each other on mAP50-95, which is inside the noise floor of a 56-image validation set.
 
 **Negative result, published as such:** ONNX Runtime's CPU provider is *slower* than the PyTorch CPU baseline it was meant to beat (94 ms vs 71 ms). On this host CoreML is the win; "export to ONNX" is not.
 
-### 2. Correctness — zone-gated track label stabilization
+### 2. Correctness: zone-gated track label stabilization
 
-No tracker stabilizes class labels: ByteTrack associates detections, and the class is whatever the detector emitted on that frame. Replaying the baseline over `video5` confirmed the instability — 13 of 24 tracks changed class during their lifetime, 56 switches in total, 6 of them within ±10 frames of a counting decision.
+No tracker stabilizes class labels: ByteTrack associates detections, and the class is whatever the detector emitted on that frame. Replaying the baseline over `video5` confirmed the instability: 13 of 24 tracks changed class during their lifetime, 56 switches in total, 6 of them within ±10 frames of a counting decision.
 
-`TrackLabelStabilizer` accumulates confidence-weighted class votes per track and commits a label once, permanently (the pattern NVIDIA DeepStream uses for its ID-keyed classifier cache). The critical detail is **which frames are allowed to vote**: only detections whose centroid falls inside an evidence band bracketing the centerline (±15% of frame width). Approach and exit frames — where the bottle is small, off-center, or partly occluded, and the model is systematically biased toward `good` — are excluded by design.
+`TrackLabelStabilizer` accumulates confidence-weighted class votes per track and commits a label once, permanently (the pattern NVIDIA DeepStream uses for its ID-keyed classifier cache). The critical detail is **which frames are allowed to vote**: only detections whose centroid falls inside an evidence band bracketing the centerline (±15% of frame width). Approach and exit frames, where the bottle is small, off-center, or partly occluded, and the model is systematically biased toward `good`, are excluded by design.
 
 An earlier version that voted over the whole track history is documented in `benchmarks/RESULTS.md` as a failure: it crushed the flicker metrics but committed two defective bottles to `good` before they ever reached the line, silently missing them. The gate is a structural fix, not a tuning knob.
 
@@ -134,7 +134,7 @@ The default stays `model/weights/best.pt`. `DetectorConfig` exposes `model_path`
 - The validation split is 56 images, so accuracy differences under roughly 1.5 points are noise and are reported as such rather than as gains.
 - The stabilizer's three constants are calibrated on one video. A second labelled clip with different camera geometry is the next measurement that matters.
 - Latency is burst-after-warmup on a fanless machine; sustained load will throttle and p50 will rise.
-- The int8 artifact is weight-only palettization with fp16 activations, not a fully quantized network — full INT8 crashes the current coremltools/torch combination, and ultralytics 8.4.105 offers no activation-calibration path for CoreML.
+- The int8 artifact is weight-only palettization with fp16 activations, not a fully quantized network: full INT8 crashes the current coremltools/torch combination, and ultralytics 8.4.105 offers no activation-calibration path for CoreML.
 
 ## Setup
 
@@ -181,4 +181,4 @@ defect-db export   # stats / clear likewise
 
 ## Roadmap
 
-- Interval inference (detect every Nth frame, tracker-held boxes between), VideoToolbox hardware decode, ReID trackers, and a second-video validation set are deferred — see `benchmarks/RESULTS.md` §Future work.
+- Interval inference (detect every Nth frame, tracker-held boxes between), VideoToolbox hardware decode, ReID trackers, and a second-video validation set are deferred; see `benchmarks/RESULTS.md` §Future work.
