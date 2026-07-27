@@ -6,8 +6,12 @@ Automated visual inspection system for identifying defects in Kirkland plastic b
 
 This system uses YOLOv11s object detection and Bytetrack object tracking to automatically detect and classify defective bottles in real-time. Designed for quality control in manufacturing line environments.
 
-[![Demo video](assets/thumbnail.png)](https://www.youtube.com/watch?v=Nh-hHzurpris)
-*Click to Watch Demo*
+<div align="center">
+  <a href="https://youtu.be/zSFzK_-4PTk">
+    <img src="assets/thumbnail.jpg" alt="Demo video" width="600">
+  </a>
+  <p><em>Click to Watch Demo</em></p>
+</div>
 
 
 ## Project structure
@@ -83,6 +87,8 @@ Both fixes were measured before and after on a fixed input (`assets/video5.mov`,
 | Crossings logged correctly vs ground truth | 5/5 | 5/5 |
 | mAP50-95 on the local val split | 0.9502 | 0.9567 (within noise) |
 
+The structural win is near-crossing class switches 6→0 on `video5`. Both before and after log 5/5 crossings correctly, but 5/5 is a point estimate on n=5 — its Wilson 95% CI is [0.566, 1.0], so treat it as indicative, not proven. The near-crossing switch count is the load-bearing measurement.
+
 ### 1. Runtime: CoreML export
 
 The model was exported to CoreML (fp16 and 8-bit weight-palettized) and ONNX, then benchmarked against the PyTorch baseline on CPU and MPS. 30 warmup frames, 300 measured frames, 3 runs per configuration, quantiles over per-call latency.
@@ -119,6 +125,10 @@ An earlier version that voted over the whole track history is documented in `ben
 
 The residual 31 switches all sit outside the decision zone: still visible in the annotation, structurally unable to reach a database row.
 
+### 3. Uncertainty: conformal logging guard
+
+The log decision carries a distribution-free coverage guarantee (split-conformal, Angelopoulos & Bates arXiv:2107.07511). Per-detection nonconformity scores (`s = 1 − conf`, mispredictions pinned to 1) are calibrated on the val split; the runtime rule is a single threshold τ on crossing confidence. A crossing that clears τ is logged as a defect; one that does not is persisted as `UNCERTAIN` instead of a guessed class — the system abstains rather than vouch. On the current calibration (n_cal=28, α=0.1): τ = 0.918, empirical holdout coverage 96.4% vs 90% nominal, and the guard demonstrably abstained on a real crossing whose confidence was 0.887 (`benchmarks/results/conformal_report.md`). RAPS was considered and rejected — its regularization exists for K≫4 tail problems and ultralytics exposes only top-class confidence; the alternatives ledger is in `benchmarks/RESULTS.md`.
+
 ### Using it
 
 Exported artifacts are generated, not committed (`benchmarks/models/` is gitignored). Build them with `python benchmarks/export_models.py`, then point the pipeline at one:
@@ -127,7 +137,7 @@ Exported artifacts are generated, not committed (`benchmarks/models/` is gitigno
 defect-detect --model benchmarks/models/best_fp16.mlpackage --source 0
 ```
 
-The default stays `model/weights/best.pt`. `DetectorConfig` exposes `model_path`, `device`, and `imgsz`, settable in code or via `DetectorConfig.from_yaml`.
+The default runtime now auto-selects the CoreML fp16 artifact (`DetectorConfig.model_path = "auto"` → `resolve_model_path`, `src/defect_detection/config.py`): if `benchmarks/models/best_fp16.mlpackage` exists it is used, else it falls back to `model/weights/best.pt` with a warning. `DetectorConfig` exposes `model_path`, `device`, and `imgsz`, settable in code or via `DetectorConfig.from_yaml`.
 
 ### Limitations
 

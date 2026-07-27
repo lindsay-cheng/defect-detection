@@ -72,12 +72,20 @@ class Inspector:
         # defect_type as before.
         self._labels.update(detections, frame_width)
         for det in detections:
-            if det.get("track_id") is None:
+            track_id = det.get("track_id")
+            if track_id is None:
+                # ponytail: no track -> no epistemic state worth committing; mark
+                # evaluating so the UI renders neutral. upgrade = a transient-id
+                # path for untracked but high-conf singletons.
+                det["label_state"] = "evaluating"
                 continue
             det["raw_defect_type"] = det.get("defect_type")
-            stable = self._labels.label_for(det["track_id"])
+            stable = self._labels.label_for(track_id)
             if stable is not None:
                 det["defect_type"] = stable
+            det["label_state"] = (
+                "committed" if self._labels.is_committed(track_id) else "evaluating"
+            )
 
         mid_x = frame_width // 2
         for detection in detections:
