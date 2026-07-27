@@ -42,7 +42,7 @@ Engine mode (`model.track` per-call, ms), aggregate p50 across 3 runs. Source: `
 
 ### Root cause
 
-`assets/video5.mov` replay (`benchmarks/results/replay_baseline.md`) reconstructed 5/5 crossings all-correct, but per-track class labels flickered badly: 13/24 tracks showed >1 class, 56 class switches total, and **6 switches occurred within ±10 frames of a crossing**. The bias is structural, not random:
+`assets/video5.mov` replay (`benchmarks/results/replay_baseline.md`) reconstructed 5/5 crossings all-correct (a point estimate on n=5 — Wilson 95% CI [0.566, 1.0], indicative not proven), but per-track class labels flickered badly: 13/24 tracks showed >1 class, 56 class switches total, and **6 switches occurred within ±10 frames of a crossing**. The bias is structural, not random:
 
 - Approach frames (small, occluded, off-center bottles) systematically misclassify toward `good` — e.g. track 9 opens `good(x11) -> no_label(x8) -> good(x7) -> ...` before settling; track 15 opens `good(x23) -> low_water(x172) -> good(x2) -> low_water(x9) -> ...`.
 - The crossing frame itself (bottle fully visible at the centerline) is the most reliable single observation.
@@ -65,7 +65,7 @@ Source: `benchmarks/results/{replay_baseline,replay_stabilized}.md`.
 | total class switches | 56 | 31 |
 | switches within ±10 frames of crossing | 6 | 0 |
 
-Crossing correctness is identical (the baseline already nailed the crossings because the crossing frame happened to be reliable); the win is near-crossing flicker elimination (6 → 0) and a 45% reduction in switches. The residual 31 switches all sit outside the decision zone — they no longer leak into committed labels.
+Crossing correctness is identical (the baseline already nailed the crossings because the crossing frame happened to be reliable); the win is near-crossing flicker elimination (6 → 0) and a 45% reduction in switches. The 5/5 crossing correctness is a point estimate on n=5 (Wilson 95% CI [0.566, 1.0] — indicative, not proven); the load-bearing measurement is the 6→0 near-crossing switch elimination. The residual 31 switches all sit outside the decision zone — they no longer leak into committed labels.
 
 ### The failed ungated attempt (why the zone gate matters)
 
@@ -98,6 +98,20 @@ End-to-end pipeline mode (`FrameReader.read` + `DetectionPipeline.detect_frame` 
 - Fixed-shape exports (CoreML/ONNX with `nms=True`) reject non-640 input sizes; only the `.pt` is dynamic — that is why the {512, 384} val rows are populated for pytorch only.
 - Self-consistency: per artifact p50 ≤ p95 ≤ p99 across all 3 runs; fps ≈ 1000/p50 (2 sig figs).
 
+## Real application path
+
+A fresh `runs=3` measurement of the CoreML fp16 artifact in pipeline mode (this report's data — `benchmarks/latency.py --model benchmarks/models/best_fp16.mlpackage --runs 3`, 30 warmup + 300 measured frames per run, fanless Air):
+
+| metric (coreml-fp16 @640, `runs=3`) | this run | prior 3-run aggregate |
+|---|---:|---:|
+| engine p50 (ms, mean of runs) | 17.88 | 16.15 |
+| e2e pipeline FPS (mean of runs) | 40.2 | 40.3 |
+
+- e2e FPS **40.2 vs the 10.6 FPS CPU `.pt` baseline** → 3.8× on the real read + `detect_frame` path. The earlier **42.3 FPS** figure was a single confirmation run, not a 3-run aggregate — quote 40.2/40.3 (both 3-run aggregates), not 42.3.
+- The engine p50 here (17.88 ms) runs slightly hotter than the prior 16.15 ms; this is a one-shot run without dedicated thermal settling on a fanless machine, so treat the ~1.7 ms delta as noise, not regression.
+- **The Tkinter GUI polls frames every 30 ms** (`DefectDetectionApp._poll_frames`, `src/defect_detection/gui/app.py:195`) → the on-screen display is capped at ~33 FPS even when inference is faster. At ~40 FPS pipeline throughput the GUI poll interval is the binding constraint, not the model; engine p50 ≈ 18 ms alone leaves ~55 FPS of inference headroom the UI cannot consume without a faster poll.
+- **The app default now auto-selects the CoreML fp16 artifact** (V1): `DetectorConfig.model_path = "auto"` and `resolve_model_path` (`src/defect_detection/config.py`) pick `benchmarks/models/best_fp16.mlpackage` when present and fall back to `model/weights/best.pt` with a warning (`# ponytail:`-documented; upgrade = a config flag forcing one path). Build the artifact with `python benchmarks/export_models.py`. Prior phases measured the artifact but the running app never exercised it (default stayed `best.pt`); this phase wires the default to the measured win.
+
 ## Operating point recommendation
 
 - **Default — `coreml-fp16.mlpackage` @640.** 4.4× over CPU baseline (62 vs 14 FPS), 2.0× over MPS (62 vs 31), no measurable accuracy loss (0.9567 vs 0.9502 = +0.65 pt, within noise), 18 MB artifact, native on Apple Silicon.
@@ -128,6 +142,40 @@ End-to-end pipeline mode (`FrameReader.read` + `DetectionPipeline.detect_frame` 
 - **Re-export-at-smaller-imgsz sweep**: 384/512 val numbers exist for the dynamic `.pt` only; CoreML/ONNX are fixed @640 and would need a fresh export per size.
 - **Second-video validation**: the stability fix is calibrated and verified on `video5` alone.
 - **k-fold cross-validation**: already called out in `README.md` WIP; the val n=56 noise floor is the binding constraint.
+
+## Conformal logging guard
+
+Calibration: `benchmarks/conformal_calibrate.py --model auto --alpha 0.1 --holdout-frac 0.5 --seed 42` over the 56-image val split (1 GT instance per image ⇒ 56 nonconformity scores). Per-instance rule: matched (IoU≥0.5) & top class == GT class ⇒ `s = 1 − conf`; matched-wrong or unmatched ⇒ `s = 1` (maximally nonconforming). q̂ = k-th smallest cal score, k = ⌈(n_cal+1)(1−α)⌉. Marginal coverage P(true class ∈ {predicted}) ≥ 1−α holds with finite-sample slack 1/(n_cal+1) (Angelopoulos & Bates, arXiv:2107.07511). Source: `benchmarks/results/conformal.json` + `conformal_report.md`.
+
+| metric | value |
+|---|---|
+| model | `benchmarks/models/best_fp16.mlpackage` (auto) |
+| alpha | 0.10 (nominal 0.90) |
+| n_cal / n_holdout | 28 / 28 |
+| q̂ | 0.0820 |
+| τ = 1 − q̂ | **0.9180** |
+| exact_regime (q̂ < 0.5) | True — top-class-only rule is *exact* (at most one softmax class > 0.5) |
+| empirical coverage (holdout) | 0.9643 (27/28) vs nominal 0.90 — within finite-sample slack |
+
+Per-class calibration: `good` 12 (12/0/0), `low_water` 7 (7/0/0), `no_cap` 6 (6/0/0), `no_label` 3 (3/0/0) — `matched_correct/matched_wrong/unmatched`. Calibrated detector matched every val instance; no matched-wrong or unmatched rows entered the calibration set.
+
+Runtime: `CoverageGuard.from_json("benchmarks/results/conformal.json")` loads τ at `DetectionPipeline.__init__`; a defect at the crossing with `conf < τ` → `UNCERTAIN` bottle row (no defect row, no crop save), `det["coverage"] = "abstained"`, `total_abstentions += 1`. Inspector's `total_defects` / `total_inspected` are unchanged (guard changes persistence, not counting).
+
+Replay regression with guard active (`benchmarks/results/replay_coverage.md`, `benchmarks/models/best_fp16.mlpackage`):
+
+- Crossings reconstructed: 5 / 5 (OK-good=2, OK-defect=3, FALSE-POSITIVE=0, MISS=0, WRONG-TYPE=0).
+- Per-crossing conf vs τ=0.918: seq1 `good` 0.823 (no guard — good), seq2 `no_label` 0.934 ≥ τ **covered**, seq3 `low_water` 0.934 ≥ τ **covered**, seq4 `good` 0.924 (no guard — good), seq5 `no_cap` **0.887 < τ → ABSTAINED**.
+- **FINDING**: the `no_cap` GT defect at seq 5 abstains (conf 0.887 just below τ=0.918). The inspector's `logged=True` flag still appears in the replay's crossing table because it reads the inspector view (not the persistence) — the *persistence path* rewrote it: an `UNCERTAIN` bottle row was written in place of a defect row, `total_abstentions=1`. The guard is working as designed; the replay harness surfaces the inspector's intent but does not yet drill into the conformal persistence split — a documented harness blind spot, not a regression.
+
+## Safety
+
+See `defect-detection-vault/Safety — ODD & FMEA.md` for the ODD and the 8-row SOTIF-flavored
+FMEA. Applicable frame is ISO 21448 (perception capability insufficiency), not ISO 26262
+(systematic E/E faults) — see [[Elevation Plan — Rigor, Uncertainty & Validation]] alternatives
+ledger for the rejected-standards rationale. Runtime monitor: `DetectionPipeline._check_invariants`
+(NaN/Inf confidence + sane detection count; log-only warnings this session) plus the conformal
+abstain path in `CoverageGuard` (coverage-guaranteed, not threshold-cut). The n=5 replay Wilson
+CI [0.566, 1.0] is still binding; the guard is not framed as a 100% claim.
 
 ## Reproduction
 

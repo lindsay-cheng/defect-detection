@@ -8,7 +8,7 @@ from defect_detection.config import DetectorConfig
 class TestDetectorConfigDefaults:
     def test_defaults(self):
         cfg = DetectorConfig()
-        assert cfg.model_path == "model/weights/best.pt"
+        assert cfg.model_path == "auto"  # auto -> CoreML fp16 if present (see resolve_model_path)
         assert cfg.conf_threshold == 0.5
         assert cfg.centerline_tolerance == 15
 

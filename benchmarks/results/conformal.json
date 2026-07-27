@@ -1,0 +1,36 @@
+{
+  "model": "benchmarks/models/best_fp16.mlpackage",
+  "alpha": 0.1,
+  "n_cal": 28,
+  "n_holdout": 28,
+  "q_hat": 0.08203125,
+  "tau": 0.91796875,
+  "exact_regime": true,
+  "empirical_coverage_holdout": 0.9642857142857143,
+  "calibration": {
+    "no_cap": {
+      "matched_correct": 6,
+      "matched_wrong": 0,
+      "unmatched": 0,
+      "total": 6
+    },
+    "good": {
+      "matched_correct": 12,
+      "matched_wrong": 0,
+      "unmatched": 0,
+      "total": 12
+    },
+    "no_label": {
+      "matched_correct": 3,
+      "matched_wrong": 0,
+      "unmatched": 0,
+      "total": 3
+    },
+    "low_water": {
+      "matched_correct": 7,
+      "matched_wrong": 0,
+      "unmatched": 0,
+      "total": 7
+    }
+  }
+}

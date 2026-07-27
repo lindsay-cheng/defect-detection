@@ -101,6 +101,11 @@ class TrackLabelStabilizer:
         # bottle, one state" intuition. upgrade = a proper prior or bard-score tiebreak.
         return max(v, key=v.get)
 
+    def is_committed(self, track_id: int) -> bool:
+        """whether this track's label is frozen (committed). one-line accessor for
+        callers that need only the epistemic state, not the label value."""
+        return track_id in self.committed
+
     def reset(self) -> None:
         """clear all state (track ids restart → vote state is meaningless)."""
         self.votes.clear()

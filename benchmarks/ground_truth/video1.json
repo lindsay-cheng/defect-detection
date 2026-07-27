@@ -1,0 +1,10 @@
+{
+    "video": "assets/video1.mov",
+    "crossings": [
+      { "seq": 1, "class": "good" },
+      { "seq": 2, "class": "no_label" },
+      { "seq": 3, "class": "low_water" },
+      { "seq": 4, "class": "no_cap" }
+    ]
+  }
+  

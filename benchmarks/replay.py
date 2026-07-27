@@ -14,12 +14,18 @@ import argparse
 import json
 import os
 import shutil
+import sys
 import tempfile
 from collections import defaultdict
 
 from defect_detection.config import DetectorConfig
 from defect_detection.inspection.pipeline import DetectionPipeline
 from defect_detection.video import FrameReader
+
+# ponytail: metrics live alongside this file; import as a sibling module so
+# this dir stays runnable standalone without packaging tricks.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from metrics import fmt_ci, label_stability, wilson_interval
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,6 +109,28 @@ def group_by_track(per_frame: list[list[dict]]) -> dict[int, list[tuple]]:
                 )
             )
     return by_track
+
+
+def classes_by_track(
+    per_frame: list[list[dict]],
+) -> tuple[dict[int, list[str]], dict[int, list[str]]]:
+    """per-track raw vs stabilized class sequences for label_stability.
+
+    raw uses raw_defect_type when the inspector set it, else the (stabilized)
+    defect_type — that fallback applies outside the pipeline (no stabilizer).
+    # ponytail: second grouping pass is simpler than threading raw through the
+    # existing group_by_track tuple;same O(n) cost.
+    """
+    raw: dict[int, list[str]] = defaultdict(list)
+    stable: dict[int, list[str]] = defaultdict(list)
+    for dets in per_frame:
+        for d in dets:
+            tid = d.get("track_id")
+            if tid is None:
+                continue
+            stable[tid].append(d.get("defect_type"))
+            raw[tid].append(d.get("raw_defect_type", d.get("defect_type")))
+    return raw, stable
 
 
 def reconstruct_crossings(by_track: dict[int, list[tuple]]) -> list[tuple]:
@@ -211,6 +239,9 @@ def render_report(
     crossings: list[tuple],
     flick: dict,
     corr: dict,
+    gt_tags: list[str | None],
+    stab_raw: dict,
+    stab_stable: dict,
 ) -> str:
     lines = []
     lines.append(f"# Replay Benchmark — `{video}`")
@@ -223,11 +254,24 @@ def render_report(
     lines.append("")
 
     lines.append("## Crossing Reconstruction (per-track first-centerline frame)")
-    lines.append("| seq | frame | track_id | display_id | class_at_crossing | conf | logged |")
-    lines.append("|---|---|---|---|---|---|---|")
+    # ponytail: tags column appears only when GT carries tags, so untagged GT
+    # reproduces the original table byte-for-byte.
+    has_tags = any(t is not None for t in gt_tags)
+    if has_tags:
+        lines.append(
+            "| seq | frame | track_id | display_id | class_at_crossing | conf | logged | tags |"
+        )
+        lines.append("|---|---|---|---|---|---|---|---|")
+    else:
+        lines.append("| seq | frame | track_id | display_id | class_at_crossing | conf | logged |")
+        lines.append("|---|---|---|---|---|---|---|")
     for i, c in enumerate(crossings):
         frame, tid, disp, cls, conf_, logged = c
-        lines.append(f"| {i + 1} | {frame} | {tid} | {disp} | {cls} | {conf_:.3f} | {logged} |")
+        row = f"| {i + 1} | {frame} | {tid} | {disp} | {cls} | {conf_:.3f} | {logged} |"
+        if has_tags:
+            tags = gt_tags[i] if i < len(gt_tags) and gt_tags[i] is not None else ""
+            row += f" {tags} |"
+        lines.append(row)
     lines.append("")
 
     lines.append("## Flicker Metrics")
@@ -263,6 +307,52 @@ def render_report(
     for seq, gt_cls, obs_cls, logged, verdict in corr["table"]:
         lines.append(f"| {seq} | {gt_cls} | {obs_cls} | {logged} | {verdict} |")
     lines.append("")
+
+    # --- additive sections (do not alter any line above) ---
+    lines.append("## Correctness confidence intervals")
+    expected = corr["expected"]
+    detected = min(corr["observed"], expected)
+    rate_lo, rate_hi = wilson_interval(detected, expected)
+    lines.append(
+        f"- crossing-detection rate: {detected}/{expected} = "
+        f"{(detected / expected) if expected else 0.0:.3f} "
+        f"CI {fmt_ci(rate_lo, rate_hi)}"
+    )
+    vc = corr["counts"]
+    ok_good = vc.get("OK-good", 0)
+    ok_defect = vc.get("OK-defect", 0)
+    correct = ok_good + ok_defect
+    clo, chi = wilson_interval(correct, expected)
+    lines.append(
+        f"- correct-log rate (OK-good+OK-defect)/expected: {correct}/{expected} = "
+        f"{(correct / expected) if expected else 0.0:.3f} "
+        f"CI {fmt_ci(clo, chi)}"
+    )
+    lines.append(f"- per-verdict proportions (n = expected = {expected}):")
+    for verdict_name in ("OK-good", "OK-defect", "FALSE-POSITIVE", "MISS", "WRONG-TYPE"):
+        k = vc.get(verdict_name, 0)
+        vlo, vhi = wilson_interval(k, expected)
+        lines.append(
+            f"  - {verdict_name}: {k}/{expected} = "
+            f"{(k / expected) if expected else 0.0:.3f} CI {fmt_ci(vlo, vhi)}"
+        )
+    lines.append("")
+
+    lines.append("## Label stability")
+    lines.append(
+        f"- raw per-frame classes (raw_defect_type): mean stability "
+        f"{stab_raw['mean']:.3f}, perfectly-stable {stab_raw['n_perfect']}/{stab_raw['n_tracks']} "
+        f"({100.0 * stab_raw['prop_perfect']:.1f}%) "
+        f"CI {fmt_ci(*stab_raw['ci_perfect'])}"
+    )
+    lines.append(
+        f"- stabilized classes (defect_type):     mean stability "
+        f"{stab_stable['mean']:.3f}, perfectly-stable "
+        f"{stab_stable['n_perfect']}/{stab_stable['n_tracks']} "
+        f"({100.0 * stab_stable['prop_perfect']:.1f}%) "
+        f"CI {fmt_ci(*stab_stable['ci_perfect'])}"
+    )
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -276,8 +366,26 @@ def main() -> int:
     flick = flicker_metrics(by_track, crossing_frame_by_track)
     with open(args.gt) as f:
         gt = json.load(f)
-    corr = correctness_vs_gt(crossings, gt["crossings"])
-    report = render_report(args.video, args.model, args.conf, args.gt, crossings, flick, corr)
+    gt_crossings = gt["crossings"]
+    corr = correctness_vs_gt(crossings, gt_crossings)
+    # ponytail: tolerate an optional `tags` field per crossing; echoed into the
+    # crossing table when present, ignored downstream.
+    gt_tags = [c.get("tags") for c in gt_crossings]
+    raw_classes, stable_classes = classes_by_track(per_frame)
+    stab_raw = label_stability(raw_classes)
+    stab_stable = label_stability(stable_classes)
+    report = render_report(
+        args.video,
+        args.model,
+        args.conf,
+        args.gt,
+        crossings,
+        flick,
+        corr,
+        gt_tags,
+        stab_raw,
+        stab_stable,
+    )
 
     out_jsonl = args.out_prefix + ".jsonl"
     out_md = args.out_prefix + ".md"
