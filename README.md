@@ -2,17 +2,21 @@
 
 Automated visual inspection system for identifying defects in Kirkland plastic bottles using YOLO-based computer vision.
 
+**TL;DR**: full project lifecycle
+
+1. **Data.** Collected and labeled roughly 300 images of four defect classes (`good`, `low_water`, `no_cap`, `no_label`) in YOLO format on Roboflow.
+2. **Training.** Trained YOLO11s over 150 epochs on an 80/20 stratified split. Reaches 97.7% [mAP@0.5](mailto:mAP@0.5) on a 56-image validation set.
+3. **Optimization: runtime.** Exported to CoreML fp16 for the Apple Neural Engine, benchmarked against PyTorch CPU, MPS, and ONNX. The pipeline runs at 40.3 FPS end to end, a 3.8× gain over the PyTorch CPU baseline. ONNX CPU is documented as a negative result.
+4. **Optimization: correctness.** Wrote a `TrackLabelStabilizer` (adapted from NVIDIA DeepStream) that commits one class per track, voting only inside a centerline evidence band. Near-crossing class switches drop from 6 to 0.
+5. **Optimization: uncertainty.** Added a split-conformal logging guard (Angelopoulos & Bates). A crossing below the calibrated threshold τ = 0.918 is logged as `UNCERTAIN` instead of a guessed class.
+
+
+
 ## Overview
 
 This system uses YOLOv11s object detection and Bytetrack object tracking to automatically detect and classify defective bottles in real-time. Designed for quality control in manufacturing line environments.
 
-<div align="center">
-  <a href="https://youtu.be/zSFzK_-4PTk">
-    <img src="assets/thumbnail.jpg" alt="Demo video" width="600">
-  </a>
-  <p><em>Click to Watch Demo</em></p>
-</div>
-
+*Click to Watch Demo*
 
 ## Project structure
 
@@ -49,25 +53,29 @@ src/defect_detection/
 
 ## Preliminary Results (Controlled Environment)
 
-The custom YOLO11s model achieves 97.7% mAP@0.5 (93.1% mAP@0.5-0.95) on an 80/20 stratified train/val split. Dataset consists of ~300 images captured with varied camera angles, zoom levels, lighting, and positions. While these metrics demonstrate the model's capability to learn defect patterns, the small dataset size and single-environment capture may limit generalization.
+The custom YOLO11s model achieves 97.7% [mAP@0.5](mailto:mAP@0.5) (93.1% [mAP@0.5-0.95](mailto:mAP@0.5-0.95)) on an 80/20 stratified train/val split. Dataset consists of ~300 images captured with varied camera angles, zoom levels, lighting, and positions. While these metrics demonstrate the model's capability to learn defect patterns, the small dataset size and single-environment capture may limit generalization.
 
-| Class | Precision | Recall | mAP@0.5 | mAP@0.5-0.95 |
-|-------|-----------|--------|---------|--------------|
-| all | 0.977 | 0.969 | 0.977 | 0.931 |
-| good | 0.997 | 0.952 | 0.993 | 0.943 |
-| low_water | 0.995 | 0.923 | 0.956 | 0.891 |
-| no_cap | 0.996 | 1.000 | 0.995 | 0.967 |
-| no_label | 0.918 | 1.000 | 0.963 | 0.925 |
 
-![Training Results](model/results.png)
+| Class     | Precision | Recall | [mAP@0.5](mailto:mAP@0.5) | [mAP@0.5-0.95](mailto:mAP@0.5-0.95) |
+| --------- | --------- | ------ | ------------------------- | ----------------------------------- |
+| all       | 0.977     | 0.969  | 0.977                     | 0.931                               |
+| good      | 0.997     | 0.952  | 0.993                     | 0.943                               |
+| low_water | 0.995     | 0.923  | 0.956                     | 0.891                               |
+| no_cap    | 0.996     | 1.000  | 0.995                     | 0.967                               |
+| no_label  | 0.918     | 1.000  | 0.963                     | 0.925                               |
+
+
+Training Results
 *Training metrics over 150 epochs*
 
 **Important Limitations:**
+
 - Small dataset size increases risk of overfitting
 - Single capture environment may not generalize to diverse production settings
 - Model performance on real-world manufacturing data remains to be validated
 
 **WIP:**
+
 - Expand dataset across multiple environments and bottle types
 - K-fold cross-validation to better assess model robustness
 
@@ -75,31 +83,35 @@ The custom YOLO11s model achieves 97.7% mAP@0.5 (93.1% mAP@0.5-0.95) on an 80/20
 
 Two measured problems were addressed in one pass: the pipeline ran at ~10 FPS, and per-frame class labels flickered for the same tracked bottle, so the defect type written to the database was whichever class the model happened to emit on the single frame the bottle crossed the counting line.
 
-Both fixes were measured before and after on a fixed input (`assets/video5.mov`, 924 frames) on an Apple M4 Air 16GB. Methodology, per-run tables, and exact reproduction commands are in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+Both fixes were measured before and after on a fixed input (`assets/video5.mov`, 924 frames) on an Apple M4 Air 16GB. Methodology, per-run tables, and exact reproduction commands are in `[benchmarks/RESULTS.md](benchmarks/RESULTS.md)`.
 
 ### Headline
 
-| | before | after |
-|---|---:|---:|
-| End-to-end pipeline | 10.6 FPS | **40.3 FPS** (3.8×) |
-| Model call (engine p50) | 70.60 ms | **16.15 ms** (4.4×) |
-| Class switches near a crossing | 6 | **0** |
-| Crossings logged correctly vs ground truth | 5/5 | 5/5 |
-| mAP50-95 on the local val split | 0.9502 | 0.9567 (within noise) |
 
-The structural win is near-crossing class switches 6→0 on `video5`. Both before and after log 5/5 crossings correctly, but 5/5 is a point estimate on n=5 — its Wilson 95% CI is [0.566, 1.0], so treat it as indicative, not proven. The near-crossing switch count is the load-bearing measurement.
+|                                            | before   | after                 |
+| ------------------------------------------ | -------- | --------------------- |
+| End-to-end pipeline                        | 10.6 FPS | **40.3 FPS** (3.8×)   |
+| Model call (engine p50)                    | 70.60 ms | **16.15 ms** (4.4×)   |
+| Class switches near a crossing             | 6        | **0**                 |
+| Crossings logged correctly vs ground truth | 5/5      | 5/5                   |
+| mAP50-95 on the local val split            | 0.9502   | 0.9567 (within noise) |
+
+
+The structural win is near-crossing class switches 6→0 on `video5`. Both before and after log 5/5 crossings correctly, but 5/5 is a point estimate on n=5. Its Wilson 95% CI is [0.566, 1.0], so treat it as indicative, not proven. The near-crossing switch count is the load-bearing measurement.
 
 ### 1. Runtime: CoreML export
 
 The model was exported to CoreML (fp16 and 8-bit weight-palettized) and ONNX, then benchmarked against the PyTorch baseline on CPU and MPS. 30 warmup frames, 300 measured frames, 3 runs per configuration, quantiles over per-call latency.
 
-| config | size MB | mAP50 | mAP50-95 | engine p50 ms | engine p95 ms | FPS |
-|---|---:|---:|---:|---:|---:|---:|
-| pytorch `.pt` @640 (CPU), baseline | 18.29 | 0.9950 | 0.9502 | 70.60 | 98.40 | 14.2 |
-| pytorch `.pt` @640 (MPS) | 18.29 | 0.9950 | 0.9502 | 31.82 | 45.43 | 31.2 |
-| **coreml-fp16 @640**, recommended | 18.17 | 0.9950 | 0.9567 | 16.15 | 20.86 | **62.4** |
-| coreml-int8 @640 (`w8a16`) | 9.25 | 0.9950 | 0.9529 | 16.10 | 19.69 | 62.8 |
-| onnx-fp32 @640 | 36.21 | 0.9950 | 0.9551 | 94.08 | 126.44 | 10.6 |
+
+| config                             | size MB | mAP50  | mAP50-95 | engine p50 ms | engine p95 ms | FPS      |
+| ---------------------------------- | ------- | ------ | -------- | ------------- | ------------- | -------- |
+| pytorch `.pt` @640 (CPU), baseline | 18.29   | 0.9950 | 0.9502   | 70.60         | 98.40         | 14.2     |
+| pytorch `.pt` @640 (MPS)           | 18.29   | 0.9950 | 0.9502   | 31.82         | 45.43         | 31.2     |
+| **coreml-fp16 @640**, recommended  | 18.17   | 0.9950 | 0.9567   | 16.15         | 20.86         | **62.4** |
+| coreml-int8 @640 (`w8a16`)         | 9.25    | 0.9950 | 0.9529   | 16.10         | 19.69         | 62.8     |
+| onnx-fp32 @640                     | 36.21   | 0.9950 | 0.9551   | 94.08         | 126.44        | 10.6     |
+
 
 The table above is the model call in isolation. End-to-end through the real pipeline (video decode, tracking, centerline logic, database writes, annotation), CoreML fp16 runs at **40.3 FPS against a 10.6 FPS PyTorch-CPU baseline**, both 3-run aggregates over 300 frames.
 
@@ -115,19 +127,21 @@ No tracker stabilizes class labels: ByteTrack associates detections, and the cla
 
 An earlier version that voted over the whole track history is documented in `benchmarks/RESULTS.md` as a failure: it crushed the flicker metrics but committed two defective bottles to `good` before they ever reached the line, silently missing them. The gate is a structural fix, not a tuning knob.
 
-| metric (`video5`, same model, conf 0.5) | baseline | stabilized |
-|---|---:|---:|
-| crossings detected / expected | 5 / 5 | 5 / 5 |
+
+| metric (`video5`, same model, conf 0.5)        | baseline      | stabilized    |
+| ---------------------------------------------- | ------------- | ------------- |
+| crossings detected / expected                  | 5 / 5         | 5 / 5         |
 | correct / missed / false-positive / wrong-type | 5 / 0 / 0 / 0 | 5 / 0 / 0 / 0 |
-| tracks showing more than one class | 13 / 24 | 10 / 24 |
-| total class switches | 56 | 31 |
-| switches within ±10 frames of a crossing | 6 | **0** |
+| tracks showing more than one class             | 13 / 24       | 10 / 24       |
+| total class switches                           | 56            | 31            |
+| switches within ±10 frames of a crossing       | 6             | **0**         |
+
 
 The residual 31 switches all sit outside the decision zone: still visible in the annotation, structurally unable to reach a database row.
 
 ### 3. Uncertainty: conformal logging guard
 
-The log decision carries a distribution-free coverage guarantee (split-conformal, Angelopoulos & Bates arXiv:2107.07511). Per-detection nonconformity scores (`s = 1 − conf`, mispredictions pinned to 1) are calibrated on the val split; the runtime rule is a single threshold τ on crossing confidence. A crossing that clears τ is logged as a defect; one that does not is persisted as `UNCERTAIN` instead of a guessed class — the system abstains rather than vouch. On the current calibration (n_cal=28, α=0.1): τ = 0.918, empirical holdout coverage 96.4% vs 90% nominal, and the guard demonstrably abstained on a real crossing whose confidence was 0.887 (`benchmarks/results/conformal_report.md`). RAPS was considered and rejected — its regularization exists for K≫4 tail problems and ultralytics exposes only top-class confidence; the alternatives ledger is in `benchmarks/RESULTS.md`.
+The log decision carries a distribution-free coverage guarantee (split-conformal, Angelopoulos & Bates arXiv:2107.07511). Per-detection nonconformity scores (`s = 1 − conf`, mispredictions pinned to 1) are calibrated on the val split; the runtime rule is a single threshold τ on crossing confidence. A crossing that clears τ is logged as a defect; one that does not is persisted as `UNCERTAIN` instead of a guessed class. The system abstains rather than vouch. On the current calibration (n_cal=28, α=0.1): τ = 0.918, empirical holdout coverage 96.4% vs 90% nominal, and the guard demonstrably abstained on a real crossing whose confidence was 0.887 (`benchmarks/results/conformal_report.md`). RAPS was considered and rejected. Its regularization exists for K≫4 tail problems and ultralytics exposes only top-class confidence. The alternatives ledger is in `benchmarks/RESULTS.md`.
 
 ### Using it
 
@@ -192,3 +206,4 @@ defect-db export   # stats / clear likewise
 ## Roadmap
 
 - Interval inference (detect every Nth frame, tracker-held boxes between), VideoToolbox hardware decode, ReID trackers, and a second-video validation set are deferred; see `benchmarks/RESULTS.md` §Future work.
+
