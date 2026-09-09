@@ -1,15 +1,14 @@
 # Real-Time Bottle Defect Detection System
 
-Automated visual inspection system for identifying defects in Kirkland plastic bottles using YOLO-based computer vision.
+Automated visual inspection system for identifying defects in Kirkland plastic bottles on a simulated manufacturing line using low-latency computer vision.
 
-**TL;DR**: full project lifecycle
+**TL;DR**:
 
-1. **Data.** Collected and labeled roughly 300 images of four defect classes (`good`, `low_water`, `no_cap`, `no_label`) in YOLO format on Roboflow.
-2. **Training.** Trained YOLO11s over 150 epochs on an 80/20 stratified split. Reaches 97.7% [mAP@0.5](mailto:mAP@0.5) on a 56-image validation set.
+1. **Data.** Collected and labeled roughly 300 images of four defect classes (`good`, `low_water`, `no_cap`, `no_label`) with custom bounding-box annotations.
+2. **Training.** Trained a single-stage object detector over 150 epochs on an 80/20 stratified split. Reaches 97.7% mAP@0.5 on a 56-image validation set.
 3. **Optimization: runtime.** Exported to CoreML fp16 for the Apple Neural Engine, benchmarked against PyTorch CPU, MPS, and ONNX. The pipeline runs at 40.3 FPS end to end, a 3.8× gain over the PyTorch CPU baseline. ONNX CPU is documented as a negative result.
-4. **Optimization: correctness.** Wrote a `TrackLabelStabilizer` (adapted from NVIDIA DeepStream) that commits one class per track, voting only inside a centerline evidence band. Near-crossing class switches drop from 6 to 0.
+4. **Optimization: correctness.** Wrote a `TrackLabelStabilizer` adapted from NVIDIA DeepStream architecture that commits to one class per track, voting only inside a centerline evidence band. Near-crossing class switches drop from 6 to 0 in testing samples.
 5. **Optimization: uncertainty.** Added a split-conformal logging guard (Angelopoulos & Bates). A crossing below the calibrated threshold τ = 0.918 is logged as `UNCERTAIN` instead of a guessed class.
-
 
 
 ## Overview
